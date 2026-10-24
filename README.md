@@ -24,7 +24,8 @@ A skill is a folder with a `SKILL.md`. Copy or symlink the folders you want into
 Or keep everything in one folder, such as `~/.agents/skills`, and symlink each skill into each tool:
 
 ```sh
-git clone <this-repo> ~/.agents/skills-src
+git clone https://github.com/harssha6/agent-skills ~/.agents/skills-src
+mkdir -p ~/.claude/skills ~/.codex/skills ~/.cursor/skills
 for s in ~/.agents/skills-src/*/; do
   name=$(basename "$s")
   ln -s "$s" ~/.claude/skills/"$name"
