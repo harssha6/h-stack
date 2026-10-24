@@ -1,0 +1,4 @@
+interface:
+  display_name: "Interactive Visual Verification"
+  short_description: "Verify real browser and simulator flows"
+  default_prompt: "Use $interactive-visual-verification to test this visual flow in the right harness and report the observed result."

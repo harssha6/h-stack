@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "External review result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["lane", "summary", "decision_audit", "findings", "verification_notes"],
+  "properties": {
+    "lane": {"type": "string"},
+    "summary": {"type": "string"},
+    "decision_audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["coverage", "decisions"],
+      "properties": {
+        "coverage": {"type": "string", "enum": ["adequate", "partial", "missing"]},
+        "decisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["decision", "confidence", "evidence", "verification_status"],
+            "properties": {
+              "decision": {"type": "string"},
+              "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+              "evidence": {"type": "string"},
+              "verification_status": {"type": "string", "enum": ["supported", "weakened", "unverified", "needs-user-decision"]},
+              "notes": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "severity", "confidence", "location", "evidence", "consequence", "recommendation"],
+        "properties": {
+          "title": {"type": "string"},
+          "severity": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
+          "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+          "location": {"type": "string"},
+          "evidence": {"type": "string"},
+          "consequence": {"type": "string"},
+          "recommendation": {"type": "string"},
+          "verification": {"type": "string"}
+        }
+      }
+    },
+    "verification_notes": {"type": "array", "items": {"type": "string"}}
+  }
+}

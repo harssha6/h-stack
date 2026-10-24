@@ -1,0 +1,19 @@
+{
+  "source": "take.mp4",
+  "output": "demo.mp4",
+  "fps": 60,
+  "fade": 0.5,
+  "hold": 1.2,
+  "fonts": { "regular": "./public/fonts/Inter-Regular.ttf", "medium": "./public/fonts/Inter-Bold.ttf" },
+  "colors": { "background": "0x191917", "accent": "0x3b82f6" },
+  "eyebrow": "Example app  ·  Share a report",
+  "segments": [
+    { "type": "clean", "start": 0, "end": 25.2 },
+    { "type": "card", "title": "The breakdown" },
+    { "start": 1.6, "end": 5.4, "crop": { "x": 600, "y": 0, "w": 1360, "h": 1275 }, "step": "01", "title": "Open the report", "subtitle": "Hover highlights the row. One click opens the full report in place." },
+    { "start": 5.2, "end": 8.4, "crop": { "x": 512, "y": 0, "w": 1536, "h": 1440 }, "step": "02", "title": "Pick who sees it", "subtitle": "The share panel slides in with the current access already filled in." },
+    { "start": 8.4, "end": 11.4, "crop": { "x": 828, "y": 80, "w": 904, "h": 848 }, "step": "03", "title": "Add a note", "subtitle": "The note appears in the preview as you type, so nothing is a surprise." },
+    { "clips": [{ "start": 12.2, "end": 14.3 }, { "start": 14.8, "end": 19.9 }], "crop": { "x": 660, "y": 0, "w": 880, "h": 825 }, "step": "04", "title": "Send it", "subtitle": "A confirmation toast shows, then the report moves to the Shared list." },
+    { "start": 20.6, "end": 24.0, "crop": { "x": 1253, "y": 877, "w": 600, "h": 563 }, "step": "05", "title": "Undo if needed", "subtitle": "Undo stays available for ten seconds and restores the previous access." }
+  ]
+}

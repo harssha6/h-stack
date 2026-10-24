@@ -1,0 +1,4 @@
+interface:
+  display_name: "Crisp Voice"
+  short_description: "Write direct, precise product communication"
+  default_prompt: "Use $crisp-voice to rewrite this in my direct product and engineering voice."

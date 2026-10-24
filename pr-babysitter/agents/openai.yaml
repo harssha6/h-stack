@@ -1,0 +1,4 @@
+interface:
+  display_name: "PR Babysitter"
+  short_description: "Watch CI, bot reviews, security findings, and repo merge gates"
+  default_prompt: "Use $pr-babysitter to take this PR through checks, review fixes, and a verified handoff."

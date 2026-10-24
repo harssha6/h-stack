@@ -1,0 +1,6 @@
+interface:
+  display_name: "Clean Worktree"
+  short_description: "Create isolated worktrees with local symlinks"
+  default_prompt: "Use $clean-worktree to isolate this change in a clean branch with local runtime symlinks."
+policy:
+  allow_implicit_invocation: true

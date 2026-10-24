@@ -1,0 +1,4 @@
+interface:
+  display_name: "External Review Loop"
+  short_description: "Independent dynamic cross-model reviews"
+  default_prompt: "Use $external-review-loop to plan and run an independent review for the current change."
