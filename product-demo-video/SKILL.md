@@ -1,6 +1,6 @@
 ---
 name: product-demo-video
-description: Record a real product flow on real data and edit it into a short demo video (1080p MP4): the clean experience first, then a captioned step-by-step breakdown. Use when the user asks for a demo, a recording, a walkthrough video, a "proper demo video", a screen recording of a feature, or something to share with a team or stakeholders.
+description: "Record a real product flow on real data and edit it into a short demo video (1080p MP4): the clean experience first, then a captioned step-by-step breakdown. Use when the user asks for a demo, a recording, a walkthrough video, a \"proper demo video\", a screen recording of a feature, or something to share with a team or stakeholders."
 ---
 
 # Product Demo Video
