@@ -13,8 +13,11 @@ const FPS = Number(process.env.FPS || 60);
 const DURATION = Number(process.env.DURATION || 26);
 const OUT = process.env.OUT || 'frames';
 const URL = process.env.URL || 'http://localhost:3000/';
-fs.rmSync(OUT, { recursive: true, force: true });
-fs.mkdirSync(OUT, { recursive: true });
+if (!Number.isFinite(FPS) || FPS <= 0 || !Number.isFinite(DURATION) || DURATION <= 0) {
+  throw new Error('FPS and DURATION must be positive finite numbers.');
+}
+// Never remove a caller-supplied path: recordings must use a fresh directory.
+fs.mkdirSync(OUT);
 
 // Virtual time: performance.now, Date.now, timers and rAF only move when the loop advances them.
 // CSS and WAAPI animations are paused and seeked to the same clock every frame.

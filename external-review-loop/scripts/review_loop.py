@@ -270,7 +270,7 @@ def command_for(repo: Path, runner: str, review_prompt: str, model: str | None) 
         command = ["claude", "-p"]
         if model:
             command.extend(["--model", model])
-        return [*command, "--permission-mode", "plan", "--no-session-persistence", "--output-format", "json", "--json-schema", str(schema), review_prompt]
+        return [*command, "--permission-mode", "plan", "--no-session-persistence", "--output-format", "json", "--json-schema", schema.read_text(), review_prompt]
     if runner == "codex":
         command = ["codex", "exec"]
         if model:

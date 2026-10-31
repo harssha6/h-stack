@@ -7,6 +7,8 @@ description: Record a real product flow on real data and edit it into a short de
 
 Paths like `<skill-dir>/scripts/...` are relative to this skill's folder; replace `<skill-dir>` with wherever you installed it.
 
+The helpers need Python 3.10+, Node.js 20+, ffmpeg/ffprobe, and Chrome or Chromium. Install `playwright-core` beside the capture helper (see the repository README), set `CHROME_PATH` when the default macOS Chrome path does not apply, and choose a new `OUT` directory for each take. Capture refuses to overwrite an existing directory.
+
 You are the camera operator and the editor. Nobody hands you footage. Decide what the finished video needs, then shoot exactly that, at the pace the edit needs. Never record first and hope the edit can rescue it.
 
 A demo has two jobs, in this order:
