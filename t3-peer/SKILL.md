@@ -1,18 +1,20 @@
 ---
 name: t3-peer
-description: Coordinate an authorized task or continue work in T3 Code on another linked machine. Discover the remote environment, choose a delegated task or existing thread, and pass explicit context without assuming files were transferred.
+description: Coordinate authorized work in T3 Code on another linked machine, or transfer selected working files and notes into a fresh isolated checkout using an explicit offline handoff artifact.
 ---
 
 # T3 Peer
 
 Run work where the required checkout, application or login already exists. This
-is an instruction-only workflow for T3's native linked-environment tools. It
-requires T3 on both machines and access to the relevant tools in the calling
-harness. Tool names and fields vary by version; inspect their current schemas.
+uses T3's native linked-environment tools for coordination. It requires T3 on
+both machines and access to the relevant tools in the calling harness. Tool
+names and fields vary by version; inspect their current schemas.
 
 This export does not include the legacy peer MCP client, token-login or renewal
-helpers, or Git/Syncthing transfer scripts. It does not copy working trees,
-credentials or conversation history automatically.
+helpers, or legacy Git/Syncthing transfer scripts. For an explicit file transfer,
+use the independent [selected-file handoff](references/handoff.md), with a
+versioned artifact and a fresh destination. It does not copy credentials or
+conversation history automatically and does not bundle Git history.
 
 ## Find The Right Environment
 
@@ -96,6 +98,13 @@ its destination and privacy separately. Never claim a branch, dirty files or
 credentials arrived merely because the handoff message did. The receiving agent
 must inspect its checkout and report missing state before editing. Avoid two
 agents editing the same checkout during an ownership transfer.
+
+For the bundled offline mechanism, read [the handoff contract and commands](references/handoff.md).
+Select every file and a reviewed note explicitly. Preview before applying;
+verify the artifact digest and base commit through a trusted channel. Receive
+only into a new envelope using a local known base, never over the user's
+existing checkout. A missing base needs a separately authorized clone/fetch;
+do not silently fall back to exporting history or credentials.
 
 Finish with the machine label, returned task/thread link, observed state and
 remaining work. Reuse the tool's link rather than constructing one that may open
