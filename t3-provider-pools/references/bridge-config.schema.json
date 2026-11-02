@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "h-stack native apps stdio bridge configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "nativeExecutable", "nativeHome", "allowedTools"],
+  "properties": {
+    "version": {"const": 1},
+    "nativeExecutable": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "nativeHome": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "allowedTools": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 100,
+      "propertyNames": {"type": "string", "minLength": 1, "maxLength": 4096},
+      "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 4096}
+    },
+    "timeoutSeconds": {"type": "number", "minimum": 0.1, "maximum": 120}
+  },
+  "$comment": "Runtime invariants additionally require absolute available executable/home paths, bounded strings without control characters, and unique native tool targets. This config never accepts credentials."
+}

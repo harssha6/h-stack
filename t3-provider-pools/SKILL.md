@@ -6,11 +6,18 @@ description: Plan or diagnose separate provider accounts and configuration homes
 # T3 Provider Pools
 
 Keep the user's chosen accounts separate and prove which route a T3 session
-actually uses. This instruction-only workflow requires an installed T3 version
+actually uses. This workflow requires an installed T3 version
 that supports the intended provider configuration, the relevant native clients,
 and authorized access to their local configuration. A proxy is optional; when
 one is used, its installation, license and compatibility must be checked
-separately. No proxy, login helper, app bridge or alignment script ships here.
+separately. Portable stdio app-bridge, discovery-check and candidate-alignment
+helpers ship here; they do not install a proxy, log in, copy credentials or edit
+live T3 settings. Read [portable tools](references/portable-tools.md) before
+using them, including their experimental native-protocol compatibility limits.
+
+The helpers require Python 3.10+ on macOS or Linux. Their offline tests use fake
+native executables and temporary account directories only. A passing test does
+not establish that a real account or installed T3/Codex version works.
 
 ## Establish The Supported Configuration
 

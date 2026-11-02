@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "h-stack candidate-only provider alignment spec",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "updates"],
+  "properties": {
+    "version": {"const": 1},
+    "updates": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "expectedDriver", "homePath"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1, "maxLength": 4096},
+          "expectedDriver": {"enum": ["codex", "claudeAgent"]},
+          "homePath": {"type": "string", "minLength": 1, "maxLength": 4096},
+          "binaryPath": {"type": "string", "minLength": 1, "maxLength": 4096},
+          "displayName": {"type": "string", "minLength": 1, "maxLength": 4096}
+        }
+      }
+    }
+  },
+  "$comment": "Runtime invariants additionally require existing matching instance IDs/drivers, absolute paths, unique updates, no overlapping changed native homes, and fresh protected output distinct from the input. No credentials or model catalog can be supplied."
+}
