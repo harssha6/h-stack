@@ -1,0 +1,53 @@
+name: Portable host tools
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    name: Offline / ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: '3.10'
+          - os: ubuntu-latest
+            python: '3.12'
+          - os: macos-latest
+            python: '3.12'
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out source
+        # actions/checkout v7.0.1, verified against its public release tag.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Select Python
+        # actions/setup-python v7.1.0, verified against its public release tag.
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: hum lifecycle, terminal, and packaging fixtures
+        run: python -m unittest discover -s hum/scripts/tests -v
+      - name: Git handoff fixtures
+        run: python -m unittest discover -s t3-peer/scripts -p 'test_*.py' -v
+      - name: Provider configuration and bridge fixtures
+        run: python -m unittest discover -s t3-provider-pools/scripts -p 'test_*.py' -v
+      - name: Add-only skill linker fixtures
+        run: python -m unittest discover -s tools -p 'test_*.py' -v
+      - name: PR evidence collector fixtures
+        run: python -m unittest discover -s pr-babysitter/scripts -p 'test_*.py' -v
+      - name: Dependency-free help smoke checks
+        run: |
+          python hum/scripts/hum --help
+          python hum/scripts/install.py --help
+          python t3-peer/scripts/t3_handoff.py --help
+          python tools/link-agent-skills.py --help
