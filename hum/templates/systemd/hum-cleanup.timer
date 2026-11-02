@@ -1,0 +1,11 @@
+[Unit]
+Description=Inspect hum environment leases every fifteen minutes
+
+[Timer]
+OnCalendar=*-*-* *:00/15:00
+RandomizedDelaySec=30s
+Persistent=true
+Unit=hum-cleanup.service
+
+[Install]
+WantedBy=timers.target

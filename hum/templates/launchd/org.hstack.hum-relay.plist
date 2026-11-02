@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>org.hstack.hum-relay</string>
+  <key>ProgramArguments</key>
+  <array><string>/absolute/path/to/hum</string><string>relay</string></array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HUM_SESSION</key><string>hum</string>
+    <key>HUM_HERDR_BIN</key><string>/absolute/path/to/herdr</string>
+    <key>HUM_NOTIFY</key><string>desktop</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><false/>
+  <key>StandardOutPath</key><string>/absolute/path/to/relay.log</string>
+  <key>StandardErrorPath</key><string>/absolute/path/to/relay-error.log</string>
+</dict>
+</plist>
