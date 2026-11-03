@@ -1,6 +1,6 @@
 # h-stack
 
-A curated set of 25 skills I use with Claude Code, Codex and Cursor. Each is a folder with a `SKILL.md` and, where needed, scripts and references.
+A curated set of 26 skills I use with Claude Code, Codex and Cursor. Each is a folder with a `SKILL.md` and, where needed, scripts and references.
 
 These are portable exports from my shared skills folder. Personal identities, private hosts and project-specific setup are left out. Install the skills you need; the instructions adapt to the tools and repository you actually have.
 
@@ -35,8 +35,9 @@ These are portable exports from my shared skills folder. Personal identities, pr
 
 - [agent-doc-bootstrap](agent-doc-bootstrap/SKILL.md): write thin, durable repository instructions without copying a snapshot of the repo.
 - [context-rollover](context-rollover/SKILL.md): preserve decisions and verification in a handoff; start a new task only when explicitly requested and supported.
-- [t3-peer](t3-peer/SKILL.md): work with threads on another linked T3 Code environment using the tools available in your harness.
-- [t3-provider-pools](t3-provider-pools/SKILL.md): diagnose account isolation, provider routing and app authentication from your own installed configuration.
+- [t3-peer](t3-peer/SKILL.md): coordinate linked T3 environments and transfer selected working files into a fresh checkout with a known local base.
+- [t3-provider-pools](t3-provider-pools/SKILL.md): diagnose account isolation, expose explicitly allowed native app tools over stdio, and prepare provider-home configuration candidates.
+- [hum](hum/SKILL.md): manage visible Herdr processes with ownership leases, guarded cleanup, logs and optional host integration.
 - [sticky-notes](sticky-notes/SKILL.md): edit Markdown notes in a directory you choose and mark tasks complete only after verification.
 - [savethat-cli](savethat-cli/SKILL.md): retrieve saved links with the official SaveThat CLI and an existing authenticated account.
 - [honcho-memory](honcho-memory/SKILL.md): recall and save a few durable facts in a user-configured Honcho workspace shared by agents.
@@ -95,8 +96,9 @@ Most of the new skills are instructions only. Supporting references ship in thei
 - **Honcho memory:** an authenticated Honcho service or MCP connection, a selected workspace and a configured peer/identity. This repository does not deploy Honcho, create a peer, ingest conversations or grant permission to store private content. Without that setup the skill skips automatic memory access and reports missing setup for an explicit request.
 - **Infisical:** the official CLI plus an existing Cloud account or self-hosted service and permission for the selected organization/project. Authentication stays local. The skill discovers the installed CLI's commands; no private endpoint, VPN or machine-specific wrapper is bundled.
 - **Context rollover:** supported thread/task tooling is optional. Without it the skill returns a complete handoff to copy into a new conversation.
-- **T3 peer:** a T3 Code harness with linked-environment and thread tools, plus an authorized remote environment. The export contains instructions only, with no custom MCP client, login renewal or Git/Syncthing transfer helper.
-- **Provider pools:** your installed T3 Code, provider and proxy documentation/configuration. This is an instruction-only workflow; it does not install proxies, inject credentials or alter shared provider settings.
+- **T3 peer:** native linked-environment/thread tools for coordination. The [selected-file handoff helper](t3-peer/references/handoff.md) needs Python 3.10+, Git 2.29+, an existing shared directory and a trusted local base checkout on the receiving machine. It transfers no Git history, requires explicit file selection and an independently expected commit/artifact digest, and creates a fresh destination. It does not renew logins, register MCP servers, install Syncthing or overwrite an existing checkout.
+- **Provider pools:** your installed T3 Code/provider documentation and configuration. The [portable tools](t3-provider-pools/SKILL.md) use Python 3.10+. The stdio bridge requires an explicitly selected native Codex executable/home with the supported experimental app-server protocol and an explicit tool allowlist. The checker starts discovery, not inference; alignment writes a new protected candidate only. No private gateway shim, proxy installation, credential copying or live settings replacement is included.
+- **Hum:** Python 3.10+, Git and a compatible [Herdr](https://github.com/herdrdev/herdr) executable. The package includes the command and its lifecycle/terminal helpers; read [hum/SKILL.md](hum/SKILL.md) before installation. Tailscale sharing and desktop notifications are optional and need their own configured tools. Linux-only process/terminal guards fail closed on unsupported hosts. Installation previews changes by default; no host service is enabled automatically.
 - **Sticky notes:** an existing Markdown notes directory selected by the user. No notes app is required.
 - **SaveThat:** the official `@savethat/cli` and an authenticated account with appropriate scope. The skill does not bundle the CLI, a credential launcher or the SaveThat backend. See [source coverage](SOURCE_COVERAGE.md) for the package's license/source distinction.
 - **Skill linker:** Python 3.10+ on macOS or Linux. Only explicitly selected target directories are changed with `--apply`.
@@ -115,13 +117,18 @@ python3 -m unittest discover -s pr-babysitter/scripts -v
 python3 external-review-loop/scripts/review_loop.py --help
 python3 product-demo-video/scripts/demo_video.py plan product-demo-video/scripts/example-spec.json
 python3 -m unittest discover -s tools -v
+python3 -m unittest discover -s hum/scripts/tests -v
+python3 -m unittest discover -s t3-peer/scripts -p 'test_*.py' -v
+python3 -m unittest discover -s t3-provider-pools/scripts -p 'test_*.py' -v
 ```
+
+[tools/host-tools-workflow.yml](tools/host-tools-workflow.yml) is a proposed GitHub Actions workflow for Ubuntu/Python 3.10 and 3.12 plus macOS/Python 3.12. It is a template, not an enabled workflow. A maintainer with GitHub workflow permission can review it and place it under `.github/workflows/` to run those checks. Local Linux tests do not establish macOS or live-host compatibility.
 
 ## Not bundled
 
-This is not a copy of my whole local folder. Machine-specific integrations stay out until they can work independently. In particular, `hum` is a Herdr-backed process manager with lifecycle helpers and host setup; it needs a separately tested package, not just its instruction file copied here.
+This is not a copy of my whole local folder. The portable host tools have explicit configuration, standalone resources and offline tests; they do not install my machine setup.
 
-The four portable integration skills above are instructions, not releases of their private helper implementations. The legacy peer login/Git-transfer tools, provider configuration writers/bridges and automatic skill-watcher installers are not bundled. [Source coverage](SOURCE_COVERAGE.md) lists every skill and custom integration named in the coding-setup article, its public source and the remaining release work.
+Legacy peer login/renewal and destructive receive scripts, private gateway/model shims, automatic skill-watcher installers and personal host settings remain excluded. Their safe replacements have narrower, explicit boundaries: handoff needs a known local base and a new destination; provider alignment produces a candidate; service templates require separate host setup. [Source coverage](SOURCE_COVERAGE.md) lists every skill and custom integration named in the coding-setup article, its public source and the remaining release work.
 
 ## Not in here, but worth getting
 

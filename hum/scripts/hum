@@ -1,0 +1,1430 @@
+#!/usr/bin/env python3
+"""hum: run dev servers in a shared Herdr session that agents and the user both see.
+
+One Herdr session per machine (default "hum"), one workspace per project checkout,
+one tab per server. Agents start, read, wait on, and restart servers here; the user
+watches and takes over with `hum watch`.
+"""
+
+import json
+import os
+import shutil
+import signal
+import shlex
+import subprocess
+import sys
+import time
+import uuid
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import hum_lifecycle as leases
+import hum_terminal as terminals
+
+SESSION = os.environ.get("HUM_SESSION", "hum")
+STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "hum" / SESSION
+
+USAGE = """\
+hum - shared dev servers for agents and humans (backed by Herdr)
+
+  hum up <name> [--wait TEXT] [--timeout SEC] [-- <cmd...>]
+                            start <name> for this project; no-op if already running.
+                            <cmd> defaults to the last command used for <name>,
+                            else `portless` when package.json + portless exist.
+  hum logs <name> [-n LINES]      print recent output (default 80 lines)
+  hum wait <name> <TEXT> [--timeout SEC]
+                            wait for TEXT in output since the last (re)start
+  hum restart <name> [--wait TEXT] [--timeout SEC] [-- <cmd...>]
+  up/restart lifecycle options:
+       --lifetime task|preview|persistent  new environments default to preview
+       --owner ID --purpose TEXT --ttl 2h  explicit owner and renewable lease
+  hum keep <name> [--ttl 2h] [--owner ID] [--lifetime ...]
+                            claim/extend a running environment, without restarting.
+  hum release <name> [--owner ID]
+                            release only your claim; stop when the last is released.
+  hum cleanup [--dry-run] [--json]
+                            expire explicitly managed local environments safely.
+  hum cleanup --empty-only [--dry-run] [--json]
+                            close only proved finished, unowned Linux terminals;
+                            never stop a server. Linux-only; automation is opt-in.
+  hum close <name>          same empty-only checks for one finished terminal;
+                            retain logs, command, ownership and application data.
+  hum down <name>           stop the process tree (tab and logs stay)
+  hum rm <name>             stop, unshare, and close the tab
+  hum share <name> [--port PORT]
+                            expose to your tailnet only and print an https URL
+                            (also: hum up/restart ... --share; restart keeps it)
+  hum unshare <name>        remove the tailnet URL
+  hum ls [--all] [--json]   servers in this project (--all: every project on
+                            this machine and on machines saved with
+                            `herdr machine add ... --remote-session hum`)
+  hum watch                 open the live view (detach: ctrl+b then q)
+  hum relay                 follow events on explicitly saved SSH machines
+  hum doctor                report local configuration without contacting services
+
+Events append to $XDG_STATE_HOME/hum/<session>/events.jsonl (default ~/.local/state).
+Desktop notifications are opt-in: HUM_NOTIFY=desktop or HUM_NOTIFY=ghostty (Mac).
+Crashes and commands stopped directly in a terminal do not emit notifications.
+
+Project = git checkout containing the current directory (use -C DIR to change).
+Session = $HUM_SESSION or "hum". Remote view: herdr --remote <ssh-host> --session hum
+"""
+
+
+def die(msg, code=1):
+    print(f"hum: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def herdr_bin():
+    configured = os.environ.get("HUM_HERDR_BIN")
+    if configured:
+        found = shutil.which(configured)
+        if not found:
+            die("HUM_HERDR_BIN is not an executable; set it to the installed Herdr binary")
+        return found
+    found = shutil.which("herdr")
+    if found:
+        return found
+    for cand in (Path.home() / ".local/bin/herdr", Path("/opt/homebrew/bin/herdr")):
+        if cand.exists():
+            return str(cand)
+    die("Herdr is not installed; follow https://herdr.dev or set HUM_HERDR_BIN")
+
+
+def machine_label():
+    """An explicit label, the XDG config file, or a discovered platform hostname."""
+    if os.environ.get("HUM_MACHINE"):
+        return leases.text(os.environ["HUM_MACHINE"], "machine label")
+    f = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "hum/machine"
+    if f.is_file() and f.read_text().strip():
+        return leases.text(f.read_text().strip(), "machine label")
+    import platform
+    return "mac" if platform.system() == "Darwin" else platform.node().split(".")[0]
+
+
+def herdr(*args, session=True, check=True, machine=None):
+    target = ["--machine", machine] if machine else (["--session", SESSION] if session else [])
+    cmd = [herdr_bin()] + target + list(args)
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if args[:2] == ("pane", "read"):
+        if check and r.returncode != 0:
+            die("Herdr could not read the selected pane's output")
+        return {"raw": r.stdout}
+    out = r.stdout.strip()
+    try:
+        data = json.loads(out) if out else {}
+    except json.JSONDecodeError:
+        die("Herdr returned non-JSON output; check the installed CLI's command compatibility")
+    if isinstance(data, list):
+        if r.returncode != 0 and check:
+            die("Herdr command failed; state left untouched")
+        return data
+    if not isinstance(data, dict):
+        die("Herdr returned an unsupported response shape")
+    if check and (r.returncode != 0 or "error" in data):
+        err = data.get("error", {}).get("message") if isinstance(data.get("error"), dict) else None
+        die(f"herdr {' '.join(args[:2])} failed: {err or r.stderr.strip() or out}")
+    return data.get("result", data)
+
+
+def session_running():
+    data = herdr("session", "list", "--json", session=False)
+    return any(s.get("name") == SESSION and s.get("running") for s in data.get("sessions", []))
+
+
+def ensure_server():
+    if session_running():
+        return
+    STATE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    log_fd = os.open(STATE_DIR / "server.log", os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+    log = os.fdopen(log_fd, "ab")
+    subprocess.Popen([herdr_bin(), "--session", SESSION, "server"], stdin=subprocess.DEVNULL,
+                     stdout=log, stderr=log, start_new_session=True, cwd=str(Path.home()))
+    for _ in range(50):
+        time.sleep(0.1)
+        if session_running():
+            return
+    die(f"herdr session '{SESSION}' did not start; see {STATE_DIR / 'server.log'}")
+
+
+def git(cwd, *args):
+    r = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def project(cwd):
+    """Return (label, root). Worktrees get repo@worktree so checkouts never collide."""
+    cwd = Path(cwd).resolve()
+    top = git(cwd, "rev-parse", "--show-toplevel")
+    if not top:
+        return cwd.name, cwd
+    root = Path(top)
+    common = git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    gitdir = git(root, "rev-parse", "--path-format=absolute", "--git-dir")
+    if common and gitdir and Path(common) != Path(gitdir):
+        repo = Path(common).parent.name if Path(common).name == ".git" else Path(common).name
+        return f"{repo}@{root.name}", root
+    return root.name, root
+
+
+FAVICON_PATHS = [
+    "public/favicon.svg", "public/favicon.png", "public/favicon.ico", "public/icon.svg", "public/icon.png",
+    "src/app/icon.svg", "src/app/icon.png", "src/app/favicon.ico", "app/icon.svg", "app/icon.png",
+    "app/favicon.ico", "static/favicon.png", "static/favicon.ico", "favicon.svg", "favicon.png", "favicon.ico",
+]
+# Colored squares stand in for the favicon in Herdr's text-only sidebar.
+CHIPS = [("🟥", (215, 45, 45)), ("🟧", (240, 140, 35)), ("🟨", (245, 205, 45)), ("🟩", (60, 170, 75)),
+         ("🟦", (45, 115, 220)), ("🟪", (140, 75, 195)), ("🟫", (125, 85, 55)), ("⬛", (25, 25, 25)),
+         ("⬜", (235, 235, 235))]
+
+
+def find_favicon(root):
+    for rel in FAVICON_PATHS:
+        if (root / rel).is_file():
+            return root / rel
+    return None
+
+
+def rasterize(src, size=16):
+    """Favicon -> size x size PNG via tools already on the machine; None if unavailable."""
+    out_dir = STATE_DIR / "favicons"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"{abs(hash((str(src), src.stat().st_mtime)))}.png"
+    if out.exists():
+        return out
+    run = lambda *a: subprocess.run(a, capture_output=True).returncode == 0
+    if shutil.which("sips"):
+        if src.suffix == ".svg":
+            if not (shutil.which("qlmanage") and run("qlmanage", "-t", "-s", "64", "-o", str(out_dir), str(src))):
+                return None
+            src = out_dir / f"{src.name}.png"
+        ok = run("sips", "-s", "format", "png", "-z", str(size), str(size), str(src), "--out", str(out))
+    elif shutil.which("ffmpeg") and src.suffix != ".svg":
+        ok = run("ffmpeg", "-loglevel", "error", "-y", "-i", str(src), "-vf", f"scale={size}:{size}", str(out))
+    else:
+        return None
+    return out if ok and out.exists() else None
+
+
+def decode_png(path):
+    """Minimal PNG decoder for 8-bit RGB/RGBA, non-interlaced. Returns rows of (r, g, b, a)."""
+    import struct
+    import zlib
+    data = Path(path).read_bytes()
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    pos, idat, w = 8, b"", 0
+    while pos < len(data):
+        n, kind = struct.unpack(">I4s", data[pos:pos + 8])
+        chunk = data[pos + 8:pos + 8 + n]
+        if kind == b"IHDR":
+            w, h, depth, ctype, _, _, interlace = struct.unpack(">IIBBBBB", chunk)
+            if depth != 8 or ctype not in (2, 6) or interlace:
+                return None
+            bpp = 4 if ctype == 6 else 3
+        elif kind == b"IDAT":
+            idat += chunk
+        pos += 12 + n
+    raw, stride, rows, prev = zlib.decompress(idat), w * bpp, [], bytearray(w * bpp)
+    for y in range(h):
+        f, line = raw[y * (stride + 1)], bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+        for i in range(stride):
+            a = line[i - bpp] if i >= bpp else 0
+            b, c = prev[i], prev[i - bpp] if i >= bpp else 0
+            if f == 1:
+                line[i] = (line[i] + a) & 255
+            elif f == 2:
+                line[i] = (line[i] + b) & 255
+            elif f == 3:
+                line[i] = (line[i] + (a + b) // 2) & 255
+            elif f == 4:
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                line[i] = (line[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+        rows.append([tuple(line[x * bpp:x * bpp + 3]) + ((line[x * bpp + 3],) if bpp == 4 else (255,))
+                     for x in range(w)])
+        prev = line
+    return rows
+
+
+def favicon_pixels(root):
+    src = find_favicon(root)
+    png = rasterize(src) if src else None
+    try:
+        return decode_png(png) if png else None
+    except Exception:
+        return None
+
+
+def initials(label):
+    words = [w for w in label.split("@")[0].replace("_", "-").split("-") if w]
+    text = "".join(w[0] for w in words[:2]) if len(words) > 1 else (words[0][:2] if words else "?")
+    return text.upper()
+
+
+def badge(label, pixels):
+    """Favicon's dominant color as a colored square, else the project's initials."""
+    if pixels:
+        counts = {}
+        for row in pixels:
+            for r, g, b, a in row:
+                if a > 128:
+                    key = (r // 32, g // 32, b // 32)
+                    counts[key] = counts.get(key, 0) + 1
+        if counts:
+            # Prefer a real color over white or black backgrounds when the icon has one.
+            ranked = sorted(counts.items(), key=lambda kv: -kv[1])
+            colorful = [k for k, _ in ranked if max(k) - min(k) >= 2]
+            q = colorful[0] if colorful else ranked[0][0]
+            rgb = tuple(v * 32 + 16 for v in q)
+            return min(CHIPS, key=lambda c: sum((x - y) ** 2 for x, y in zip(c[1], rgb)))[0]
+    return initials(label)
+
+
+def banner(pixels):
+    """Render the favicon with half-blocks: one text row per two pixel rows, truecolor."""
+    lines = []
+    for y in range(0, len(pixels) - 1, 2):
+        out = ""
+        for top, bot in zip(pixels[y], pixels[y + 1]):
+            t, b = top[3] > 128, bot[3] > 128
+            if t and b:
+                out += "\x1b[38;2;%d;%d;%dm\x1b[48;2;%d;%d;%dm▀" % (top[:3] + bot[:3])
+            elif t:
+                out += "\x1b[0m\x1b[38;2;%d;%d;%dm▀" % top[:3]
+            elif b:
+                out += "\x1b[0m\x1b[38;2;%d;%d;%dm▄" % bot[:3]
+            else:
+                out += "\x1b[0m "
+        lines.append(out + "\x1b[0m")
+    return "\n".join(lines) + "\n"
+
+
+def find_workspace(label):
+    for ws in herdr("workspace", "list").get("workspaces", []):
+        name = ws.get("label") or ""
+        if name == label or name.endswith(" " + label):
+            return ws["workspace_id"]
+    return None
+
+
+def ensure_workspace(label, root):
+    display = f"{badge(label, favicon_pixels(root))} {label}"
+    ws = find_workspace(label)
+    if ws:
+        herdr("workspace", "rename", ws, display)
+        return ws
+    res = herdr("workspace", "create", "--cwd", str(root), "--label", display, "--no-focus")
+    return res["workspace"]["workspace_id"]
+
+
+def panes(ws):
+    return herdr("pane", "list", "--workspace", ws).get("panes", [])
+
+
+def find_pane(ws, name):
+    for p in panes(ws):
+        if p.get("label") == name:
+            return p["pane_id"]
+    return None
+
+
+def ensure_pane(ws, root, name):
+    """Return (pane_id, created). A pane created here cannot already be running a server."""
+    pane = find_pane(ws, name)
+    if pane:
+        return pane, False
+    # Reuse the workspace's untouched first pane before opening new tabs.
+    existing = panes(ws)
+    if len(existing) == 1 and not existing[0].get("label") and not busy(existing[0]["pane_id"]):
+        p = existing[0]
+        herdr("pane", "rename", p["pane_id"], name)
+        herdr("tab", "rename", p["tab_id"], name)
+        return p["pane_id"], True
+    res = herdr("tab", "create", "--workspace", ws, "--cwd", str(root), "--label", name, "--no-focus")
+    pane = res["root_pane"]["pane_id"]
+    herdr("pane", "rename", pane, name)
+    return pane, True
+
+
+def proc_info(pane):
+    return herdr("pane", "process-info", "--pane", pane)["process_info"]
+
+
+def busy_once(pane):
+    info = proc_info(pane)
+    shell, group = info.get("shell_pid"), info.get("foreground_process_group_id")
+    if (not isinstance(shell, int) or isinstance(shell, bool) or shell <= 0
+            or not isinstance(group, int) or isinstance(group, bool) or group <= 0):
+        raise leases.PolicyError("Herdr did not return a verifiable shell/foreground process group")
+    return group != shell
+
+
+def busy(pane, agree=3, gap=0.3, max_samples=12):
+    """Stable read: prompt helpers (git status in the prompt) and shell builtins
+    briefly flip the foreground group, so require `agree` matching samples in a row."""
+    last, streak = busy_once(pane), 1
+    for _ in range(max_samples - 1):
+        if streak >= agree:
+            break
+        time.sleep(gap)
+        cur = busy_once(pane)
+        streak = streak + 1 if cur == last else 1
+        last = cur
+    return last
+
+
+def descendants(pid):
+    out = subprocess.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True).stdout
+    children = {}
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) == 2:
+            children.setdefault(int(parts[1]), []).append(int(parts[0]))
+    result, stack = [], [pid]
+    while stack:
+        for c in children.get(stack.pop(), []):
+            result.append(c)
+            stack.append(c)
+    return result
+
+
+def stop(pane, grace=10, expected=None):
+    """Ctrl-C first; then terminate the whole tree so detached children don't linger."""
+    if not busy(pane):
+        return expected is None
+    info = proc_info(pane)
+    group = info.get("foreground_process_group_id")
+    captured = leases.capture_tree(group)
+    if not captured or captured[0].get("pgid") != group:
+        return False
+    if expected is not None and not expected():
+        return False
+    # Signal only process births whose membership was proved, including on
+    # manual stops. A new foreground command cannot receive an old Ctrl-C.
+    for item in captured:
+        leases.signal_process(item, signal.SIGINT)
+    deadline = time.time() + grace
+    while time.time() < deadline:
+        time.sleep(0.25)
+        if not any(leases.same_process(item) for item in captured):
+            break
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        alive = [item for item in captured if leases.same_process(item)]
+        if not alive:
+            return True
+        for item in alive:
+            leases.signal_process(item, sig)
+        time.sleep(1.5)
+    return not any(leases.same_process(item) for item in captured)
+
+
+def pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except (ProcessLookupError, PermissionError):
+        return False
+
+
+def state_file(label, name):
+    return leases.state_path(STATE_DIR, label, name)
+
+
+def load_state(label, name):
+    f = state_file(label, name)
+    data = json.loads(f.read_text()) if f.exists() else {}
+    if not isinstance(data, dict):
+        raise leases.PolicyError("server state must be an object")
+    return data
+
+
+def save_state(label, name, data):
+    f = state_file(label, name)
+    leases.atomic_json(f, data)
+
+
+def default_cmd(root):
+    if (root / "package.json").exists() and shutil.which("portless"):
+        return "portless"
+    return None
+
+
+def read(pane, lines):
+    # `pane read` prints plain text, not JSON.
+    res = herdr("pane", "read", pane, "--source", "recent-unwrapped", "--lines", str(lines))
+    return res.get("raw", "")
+
+
+def run_archive(label, name, state):
+    import hashlib
+    generation = hashlib.sha256(state['marker'].encode()).hexdigest()[:24]
+    path = state_file(label, name).with_suffix(f'.closed-{generation}.log')
+    if path.is_symlink():
+        raise leases.PolicyError('refusing a symlinked log archive')
+    return path
+
+
+def launch(pane, cmd, label, name, root, lifecycle=None):
+    """Write a small launch script and source it in the pane, so the visible command
+    line stays short and the server runs under the pane's own interactive shell."""
+    run_id = uuid.uuid4().hex
+    marker = f"hum:start:{run_id}"
+    previous = load_state(label, name)
+    fresh = {"cmd": cmd, "cwd": str(root), "marker": marker, "started": time.time()}
+    if previous.get("share"):
+        fresh["share"] = previous["share"]
+    if lifecycle is not None:
+        fresh["lifecycle"] = lifecycle
+        fresh["binding"] = {"version": 1, "mode": "wrapper", "pane_id": pane,
+                            "marker": marker, "run_id": run_id,
+                            "shell": leases.identity(proc_info(pane).get("shell_pid"))}
+    save_state(label, name, fresh)
+    base = state_file(label, name).with_suffix("")
+    art = ""
+    pixels = favicon_pixels(root)
+    if pixels:
+        private_text(Path(f"{base}.banner"), banner(pixels))
+        art = f"cat {shlex_quote(f'{base}.banner')}\n"
+    import platform
+    host = machine_label()
+    # Mac and Linux get different pill colors so a glance tells you where it runs.
+    color = "48;2;45;115;220" if platform.system() == "Darwin" else "48;2;140;75;195"
+    pill = f"\x1b[1;{color};38;2;255;255;255m  {host.upper()}  \x1b[0m \x1b[2m{platform.node()}\x1b[0m"
+    private_text(Path(f"{base}.pill"), pill + "\n")
+    script = Path(f"{base}.sh")
+    private_text(script,
+        f"printf '\\n%s\\n' {shlex_quote(f'── {marker} ──')}\n"
+        f"{art}"
+        f"cat {shlex_quote(f'{base}.pill')}\n"
+        f"printf '%s\\n\\n' {shlex_quote(f'{label} / {name}: {cmd}')}\n"
+        f"cd {shlex_quote(str(root))} && {shlex_quote(sys.executable)} "
+        f"{shlex_quote(str(Path(__file__).resolve()))} _run {shlex_quote(label)} "
+        f"{shlex_quote(name)} {run_id}\n"
+    )
+    herdr("pane", "run", pane, f". {shlex_quote(str(script))}")
+    return marker
+
+
+def shlex_quote(s):
+    import shlex
+    return shlex.quote(s)
+
+
+def private_text(path, text):
+    """Managed command artifacts are private and never follow a file symlink."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as stream:
+        os.fchmod(stream.fileno(), 0o600)
+        stream.write(text)
+
+
+def since_marker(text, marker):
+    idx = text.rfind(f"── {marker} ──")
+    return text[idx:] if idx >= 0 else text
+
+
+def wait_for(pane, label, name, needle, timeout):
+    marker = load_state(label, name).get("marker", "")
+    start = time.time()
+    deadline = start + timeout
+    time.sleep(0.5)
+    while time.time() < deadline:
+        output = read(pane, 400)
+        tail = since_marker(output, marker)
+        if marker and f"── {marker} ──" in output and needle in tail:
+            print(f"hum: {name} ready ({needle!r} seen)")
+            return 0
+        # Grace period: the shell runs builtins before the server process appears.
+        if time.time() - start > 3 and not busy_once(pane) and not busy(pane, agree=4, gap=0.5):
+            print(tail[-4000:])
+            die(f"{name} exited before {needle!r} appeared")
+        time.sleep(0.5)
+    print(since_marker(read(pane, 60), marker)[-4000:])
+    die(f"timed out after {timeout}s waiting for {needle!r} in {name}")
+
+
+SHARE_PORTS = range(20443, 20543)
+
+
+def listening_ports(pane):
+    """TCP ports the pane's process tree listens on, read from lsof's field output."""
+    info = proc_info(pane)
+    pids = set()
+    for p in info.get("foreground_processes", []):
+        pids.add(p["pid"])
+        pids.update(descendants(p["pid"]))
+    if not pids or not shutil.which("lsof"):
+        return []
+    out = subprocess.run(["lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-a", "-p", ",".join(map(str, pids)), "-Fn"],
+                         capture_output=True, text=True).stdout
+    ports = []
+    for line in out.splitlines():
+        if line.startswith("n") and ":" in line:
+            port = line.rsplit(":", 1)[1]
+            if port.isdigit() and int(port) not in ports:
+                ports.append(int(port))
+    return ports
+
+
+def tailscale_json(*args):
+    r = subprocess.run(["tailscale", *args, "--json"], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise leases.PolicyError("could not inspect Tailscale state; routes left untouched")
+    try:
+        data = json.loads(r.stdout)
+    except json.JSONDecodeError:
+        raise leases.PolicyError("unrecognized Tailscale state; routes left untouched") from None
+    if not isinstance(data, dict):
+        raise leases.PolicyError("unrecognized Tailscale state; routes left untouched")
+    return data
+
+
+def share(pane, label, name, port=None):
+    """Expose the server to the tailnet only (never the public internet) and return its URL."""
+    if not shutil.which("tailscale"):
+        die("tailscale is not installed on this machine")
+    previous = load_state(label, name).get("share")
+    if previous is not None:
+        owned_share(previous)
+    if not port:
+        ports = listening_ports(pane)
+        if not ports:
+            die(f"{name} is not listening on a TCP port yet; pass --port")
+        port = ports[0]
+    if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+        raise leases.PolicyError("app port must be an integer from 1 to 65535")
+    dns = tailscale_json("status").get("Self", {}).get("DNSName", "")
+    if (not isinstance(dns, str) or not dns or any(c.isspace() or c in "/:@?#" for c in dns)):
+        die("could not read this machine's tailnet name (tailscale status)")
+    dns = dns.rstrip(".")
+    if not dns:
+        die("could not read this machine's tailnet name (tailscale status)")
+    serve = tailscale_json("serve", "status")
+    used, _ = serve_ports(serve)
+    target = f"http://127.0.0.1:{port}"
+    https_port = None
+    if previous is not None:
+        present = matching_owned_route(previous, serve)
+        if previous["ownership"]["host_port"] != f"{dns}:{previous['https_port']}":
+            raise leases.PolicyError("owned share hostname changed; inspect its route manually before replacing it")
+        if present and previous["app_port"] == port:
+            return previous["url"]
+        if present or previous["https_port"] not in used:
+            https_port = previous["https_port"]
+    if https_port is None:
+        https_port = next((p for p in SHARE_PORTS if p not in used), None)
+    if not https_port:
+        die("no free share port in 20443-20542")
+    r = subprocess.run(["tailscale", "serve", "--bg", f"--https={https_port}", target],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        die(f"tailscale serve failed: {r.stderr.strip() or r.stdout.strip()}")
+    record = share_record(dns, https_port, port)
+    try:
+        if not matching_owned_route(record, tailscale_json("serve", "status")):
+            raise leases.PolicyError("expected root route is absent")
+    except (leases.PolicyError, OSError, subprocess.TimeoutExpired) as error:
+        raise leases.PolicyError("Serve command succeeded but its route could not be verified; "
+                                 "no new ownership receipt saved; inspect Tailscale manually: " + str(error)) from error
+    state = load_state(label, name)
+    state["share"] = record
+    save_state(label, name, state)
+    return record["url"]
+
+
+def tcp_port(value):
+    if (not isinstance(value, str) or not value
+            or not all("0" <= character <= "9" for character in value)):
+        raise leases.PolicyError("unrecognized Serve port; routes left untouched")
+    port = int(value)
+    if not 1 <= port <= 65535:
+        raise leases.PolicyError("unrecognized Serve port; routes left untouched")
+    return port
+
+
+def host_port_number(value):
+    if not isinstance(value, str) or ":" not in value:
+        raise leases.PolicyError("unrecognized Serve host/port; routes left untouched")
+    host, port = value.rsplit(":", 1)
+    if not host:
+        raise leases.PolicyError("unrecognized Serve host/port; routes left untouched")
+    return tcp_port(port)
+
+
+def serve_ports(status):
+    if (not isinstance(status, dict)
+            or any(status.get(key) is not None and not isinstance(status[key], dict)
+                   for key in ("Web", "TCP", "AllowFunnel"))):
+        raise leases.PolicyError("unrecognized Serve routes; left untouched")
+    used = {host_port_number(host) for host in (status.get("Web") or {})}
+    used.update(tcp_port(port) for port in (status.get("TCP") or {}))
+    public = set()
+    for host, enabled in (status.get("AllowFunnel") or {}).items():
+        if not isinstance(enabled, bool):
+            raise leases.PolicyError("unrecognized Funnel flag; routes left untouched")
+        port = host_port_number(host)
+        if enabled:
+            public.add(port)
+    return used | public, public
+
+
+def route_layout(app_port):
+    return {"Handlers": {"/": {"Proxy": f"http://127.0.0.1:{app_port}"}}}
+
+
+def route_fingerprint(host_port, app_port):
+    import hashlib
+    layout = {"host_port": host_port, "web": route_layout(app_port), "tcp": {"HTTPS": True}}
+    return hashlib.sha256(json.dumps(layout, sort_keys=True).encode()).hexdigest()
+
+
+def share_record(dns, https_port, app_port):
+    host_port = f"{dns}:{https_port}"
+    return {"url": f"https://{host_port}", "https_port": https_port, "app_port": app_port,
+            "ownership": {"version": 1, "kind": "hum-serve-root", "id": uuid.uuid4().hex,
+                          "host_port": host_port, "fingerprint": route_fingerprint(host_port, app_port)}}
+
+
+def owned_share(record):
+    if (not isinstance(record, dict)
+            or any(not isinstance(record.get(key), int) or isinstance(record[key], bool)
+                   or not 1 <= record[key] <= 65535 for key in ("https_port", "app_port"))):
+        raise leases.PolicyError("share metadata is invalid; route left untouched")
+    receipt = record.get("ownership")
+    if (not isinstance(receipt, dict) or receipt.get("version") != 1 or isinstance(receipt.get("version"), bool)
+            or receipt.get("kind") != "hum-serve-root"):
+        raise leases.PolicyError("legacy/unclassified share has no hum ownership receipt; inspect it manually; route left untouched")
+    token = receipt.get("id")
+    if (not isinstance(token, str) or len(token) != 32
+            or not all(character in "0123456789abcdef" for character in token)):
+        raise leases.PolicyError("share ownership receipt is invalid; route left untouched")
+    host_port = receipt.get("host_port")
+    if (host_port_number(host_port) != record["https_port"]
+            or record.get("url") != f"https://{host_port}"
+            or receipt.get("fingerprint") != route_fingerprint(host_port, record["app_port"])):
+        raise leases.PolicyError("share ownership fingerprint changed; route left untouched")
+    return host_port
+
+
+def matching_owned_route(record, status):
+    host_port = owned_share(record)
+    _, public = serve_ports(status)
+    port = record["https_port"]
+    if port in public:
+        raise leases.PolicyError("share port has public Funnel enabled; route and ownership left untouched")
+    entries = {host: value for host, value in (status.get("Web") or {}).items()
+               if host_port_number(host) == port}
+    tcp = (status.get("TCP") or {}).get(str(port))
+    if not entries and tcp is None:
+        return False
+    if (entries != {host_port: route_layout(record["app_port"])} or not isinstance(tcp, dict)
+            or set(tcp) != {"HTTPS"} or tcp["HTTPS"] is not True):
+        raise leases.PolicyError("owned share host/path/Proxy or TLS layout changed; route left untouched")
+    return True
+
+
+def unshare(label, name):
+    state = load_state(label, name)
+    s = state.get("share")
+    if s is not None:
+        owned_share(s)
+        status = tailscale_json("serve", "status")
+        if matching_owned_route(s, status):
+            result = subprocess.run(["tailscale", "serve", f"--https={s['https_port']}", "off"],
+                                    capture_output=True)
+            if result.returncode != 0:
+                raise leases.PolicyError("could not remove the verified share route")
+        state.pop("share", None)
+        save_state(label, name, state)
+    return s
+
+
+def share_hint(cmd):
+    return ("hum: if your framework restricts development origins, allow the selected "
+            "tailnet host in its dev-server config (Next.js: allowedDevOrigins)")
+
+
+EVENTS = STATE_DIR / "events.jsonl"
+AGENTS = {"claude": "Claude", "codex": "Codex", "cursor-agent": "Cursor", "opencode": "OpenCode",
+          "gemini": "Gemini", "pi": "Pi", "grok": "Grok"}
+
+
+def ancestors():
+    """(pid, command basename) for each process above this one."""
+    table = {}
+    out = subprocess.run(["ps", "-axo", "pid=,ppid=,comm="], capture_output=True, text=True).stdout
+    for line in out.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) == 3 and parts[0].isdigit():
+            table[int(parts[0])] = (int(parts[1]), os.path.basename(parts[2].strip()))
+    chain, pid = [], os.getppid()
+    while pid in table and pid > 1 and len(chain) < 64:
+        ppid, comm = table[pid]
+        chain.append((pid, comm))
+        pid = ppid
+    return chain
+
+
+def caller():
+    """Which agent (or the user) ran this hum command."""
+    for _, comm in ancestors():
+        if comm in AGENTS:
+            return AGENTS[comm]
+    if os.environ.get("CLAUDECODE"):
+        return "Claude"
+    if any(k.startswith("CODEX_") for k in os.environ):
+        return "Codex"
+    return "you" if sys.stdin.isatty() else "a script"
+
+
+def t3_thread(root, agent):
+    """Title of the running T3 thread in this project for this agent, when exactly one matches."""
+    found = [Path(os.environ.get("T3CODE_CLI_PATH", "")), Path.home() / ".t3/bin/t3"]
+    found += sorted(Path.home().glob(".t3/runtime/versions/*/t3"), key=lambda p: p.stat().st_mtime, reverse=True)
+    t3 = next((p for p in found if p.is_file()), None)
+    if not t3 or agent in ("you", "a script"):
+        return None
+    try:
+        out = subprocess.run([str(t3), "thread", "list", "--project", str(root), "--json"],
+                             capture_output=True, text=True, timeout=8, cwd="/tmp").stdout
+        threads = json.loads(out or "[]")
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+        return None
+    running = [t for t in threads if t.get("status") == "running"
+               and agent.lower() in (t.get("providerInstanceId") or "").lower()]
+    return running[0].get("title") if len(running) == 1 else None
+
+
+def emit(event, label, name, root, cmd=""):
+    """Record a start/stop event and notify in the background so hum itself stays fast."""
+    import platform
+    data = {"ts": time.time(), "event": event, "machine": machine_label(), "host": platform.node(),
+            "project": label, "server": name, "cmd": cmd, "by": caller(), "root": str(root)}
+    subprocess.Popen([sys.executable, os.path.realpath(__file__), "_emit", json.dumps(data)],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+
+
+def finish_emit(raw):
+    data = json.loads(raw)
+    data["thread"] = t3_thread(data.get("root", ""), data.get("by", ""))
+    EVENTS.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor = os.open(EVENTS, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "a") as f:
+        os.fchmod(f.fileno(), 0o600)
+        f.write(json.dumps(data) + "\n")
+    deliver(data)
+
+
+def ghostty_tty():
+    """A tty of a Ghostty window, preferring the one showing `hum watch`."""
+    out = subprocess.run(["ps", "-axo", "pid=,ppid=,tty=,command="], capture_output=True, text=True).stdout
+    procs = {}
+    for line in out.splitlines():
+        parts = line.split(None, 3)
+        if len(parts) == 4 and parts[0].isdigit():
+            procs[int(parts[0])] = (int(parts[1]), parts[2], parts[3])
+    roots = {pid for pid, (_, _, cmd) in procs.items() if "Ghostty.app/Contents/MacOS/ghostty" in cmd}
+    if not roots:
+        return None
+
+    def under_ghostty(pid):
+        for _ in range(64):
+            if pid in roots:
+                return True
+            if pid not in procs:
+                return False
+            pid = procs[pid][0]
+        return False
+
+    best = None
+    for pid, (_, tty, cmd) in procs.items():
+        if tty in ("??", "-") or not under_ghostty(pid):
+            continue
+        if "herdr" in cmd and "attach" in cmd:
+            return f"/dev/{tty}"
+        best = best or f"/dev/{tty}"
+    return best
+
+
+def deliver(data):
+    """Deliver only when explicitly enabled; recording does not require a desktop."""
+    import platform
+    mode = os.environ.get("HUM_NOTIFY", "none")
+    if mode == "none":
+        return
+    if mode not in ("desktop", "ghostty"):
+        raise leases.PolicyError("HUM_NOTIFY must be none, desktop, or ghostty")
+    verb = {"started": "▶ started", "restarted": "↻ restarted", "stopped": "■ stopped",
+            "removed": "✕ removed"}.get(data["event"], data["event"])
+    title = f"{data['project']} / {data['server']} · {data['machine'].upper()}"
+    body = f"{verb} by {data['by']}"
+    if data.get("thread"):
+        body += f" · {data['thread']}"
+    if data.get("cmd") and data["event"] in ("started", "restarted"):
+        body += f" · {data['cmd']}"
+    clean = lambda s: s.replace(";", ",").replace("\x07", "").replace("\x1b", "")
+    tty = ghostty_tty() if mode == "ghostty" and platform.system() == "Darwin" else None
+    if tty:
+        try:
+            with open(tty, "w") as t:
+                t.write(f"\x1b]777;notify;{clean(title)};{clean(body)}\x07")
+            return
+        except OSError:
+            pass
+    if platform.system() == "Darwin":
+        if not shutil.which("osascript"):
+            raise leases.PolicyError("desktop notifications require osascript on macOS")
+        # Values are argv, never AppleScript source. Quotes and newlines in a
+        # project/command cannot become executable AppleScript.
+        script = ('on run argv\n'
+                  'display notification (item 2 of argv) with title (item 1 of argv)\n'
+                  'end run')
+        subprocess.run(["osascript", "-e", script, title, body], capture_output=True)
+    elif mode == "desktop" and shutil.which("notify-send"):
+        subprocess.run(["notify-send", "--", title, body], capture_output=True)
+    else:
+        raise leases.PolicyError("notification backend unavailable; use HUM_NOTIFY=none or configure a desktop")
+
+
+def relay():
+    """Follow enabled saved machines; this does not install services or create remote files."""
+    import threading
+    machines = herdr("machine", "list", "--json", session=False, check=False)
+    targets = [m["target"] for m in (machines if isinstance(machines, list) else [])
+               if m.get("enabled") and m.get("session") == SESSION and m.get("target")]
+    if not targets:
+        die("no remote machines saved (herdr machine add <ssh-host> --label NAME --remote-session hum)")
+    remote_command = remote_event_command()
+
+    def follow(target):
+        while True:
+            p = subprocess.Popen(["ssh", "-o", "BatchMode=yes", "-o", "ServerAliveInterval=30", "--", target,
+                                  remote_command],
+                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+            print(f"hum relay: following {target}", flush=True)
+            for line in p.stdout:
+                try:
+                    data = json.loads(line)
+                    print(f"hum relay: {data['machine']} {data['project']}/{data['server']} "
+                          f"{data['event']} by {data['by']}", flush=True)
+                    deliver(data)
+                except (json.JSONDecodeError, KeyError):
+                    continue
+            p.wait()
+            print(f"hum relay: lost {target}, retrying in 15s", flush=True)
+            time.sleep(15)
+
+    threads = [threading.Thread(target=follow, args=(t,), daemon=True) for t in targets]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+
+def remote_event_command():
+    remote_log = os.environ.get("HUM_REMOTE_EVENT_PATH", f".local/state/hum/{SESSION}/events.jsonl")
+    leases.text(remote_log, "remote event path")
+    if not remote_log.startswith("/"):
+        remote_log = "./" + remote_log
+    return "tail -n 0 -F " + shlex.quote(remote_log)
+
+
+def remote_rows():
+    """Servers on machines saved with `herdr machine add` (their own hum sessions)."""
+    rows = []
+    machines = herdr("machine", "list", "--json", session=False, check=False)
+    for m in machines if isinstance(machines, list) else []:
+        if not m.get("enabled") or m.get("session") != SESSION:
+            continue
+        name = m["label"]
+        try:
+            workspaces = herdr("workspace", "list", machine=name, check=False).get("workspaces", [])
+            for ws in workspaces:
+                for p in herdr("pane", "list", "--workspace", ws["workspace_id"], machine=name,
+                               check=False).get("panes", []):
+                    if not p.get("label"):
+                        continue
+                    info = herdr("pane", "process-info", "--pane", p["pane_id"], machine=name,
+                                 check=False).get("process_info", {})
+                    running = info.get("foreground_process_group_id") != info.get("shell_pid")
+                    fg = (info.get("foreground_processes") or [{}])[0].get("cmdline", "") if running else ""
+                    rows.append((name, ws.get("label") or "", p["label"], "running" if running else "stopped",
+                                 fg[:60]))
+        except SystemExit:
+            rows.append((name, "(unreachable)", "", "", ""))
+    return rows
+
+
+def owner_id(opts):
+    explicit = opts.get("--owner") or os.environ.get("HUM_OWNER")
+    if explicit:
+        return leases.text(explicit, "owner")
+    # Provider session identifiers are renewable leases, never T3 thread IDs.
+    if os.environ.get("CODEX_THREAD_ID"):
+        return "codex:" + os.environ["CODEX_THREAD_ID"]
+    if os.environ.get("CLAUDE_SESSION_ID"):
+        return "claude:" + os.environ["CLAUDE_SESSION_ID"]
+    import getpass
+    return "manual:" + getpass.getuser()
+
+
+def run_file(label, name, run_id):
+    if (not isinstance(run_id, str) or len(run_id) != 32
+            or not all(c in "0123456789abcdef" for c in run_id)):
+        raise leases.PolicyError("invalid run generation")
+    path = state_file(label, name).with_suffix(f".run-{run_id}.json")
+    if path.is_symlink():
+        raise leases.PolicyError("refusing a symlinked run record")
+    return path
+
+
+def execute_run(label, name, run_id):
+    """Run in the pane's foreground job and publish its immutable birth identity."""
+    state = load_state(label, name)
+    expected = "hum:start:" + run_id
+    binding = state.get("binding", {})
+    if state.get("marker") != expected or binding.get("run_id") != run_id:
+        die("run was replaced before its command started")
+    process = leases.identity(os.getpid())
+    if process is None:
+        die("could not establish the managed process birth identity")
+    leases.atomic_json(run_file(label, name, run_id),
+                       {"marker": expected, "process": process, "pgid": os.getpgrp()})
+    shell = os.environ.get("SHELL") or "/bin/sh"
+    os.chdir(state["cwd"])
+    os.execv(shell, [shell, "-c", state["cmd"]])
+
+
+def adopt_binding(pane, state):
+    info = proc_info(pane)
+    shell = leases.identity(info.get("shell_pid"))
+    pgid = info.get("foreground_process_group_id")
+    process = leases.identity(pgid)
+    if shell is None or process is None or pgid == info.get("shell_pid"):
+        raise leases.PolicyError("no identifiable foreground job to adopt")
+    marker = state.get("marker")
+    if not isinstance(marker, str) or not marker:
+        raise leases.PolicyError("unclassified pane has no recorded hum run marker")
+    return {"version": 1, "mode": "adopted", "pane_id": pane, "marker": marker,
+            "shell": shell, "process": process, "pgid": pgid}
+
+
+def binding_matches(pane, label, name, state):
+    """A different job in the same pane is not the expired environment."""
+    binding = state.get("binding")
+    if (not isinstance(binding, dict) or binding.get("version") != 1
+            or binding.get("pane_id") != pane or binding.get("marker") != state.get("marker")
+            or not leases.same_process(binding.get("shell"))):
+        return False
+    if binding.get("mode") == "wrapper":
+        try:
+            job = json.loads(run_file(label, name, binding.get("run_id")).read_text())
+        except (OSError, ValueError):
+            return False
+        if not isinstance(job, dict) or job.get("marker") != state.get("marker"):
+            return False
+    elif binding.get("mode") == "adopted":
+        job = binding
+    else:
+        return False
+    info = proc_info(pane)
+    return (leases.same_process(job.get("process"))
+            and info.get("foreground_process_group_id") == job.get("pgid")
+            and info.get("foreground_process_group_id") != info.get("shell_pid"))
+
+
+def exact_thread_status(thread_id, cache):
+    if thread_id in cache:
+        return cache[thread_id]
+    status = "unknown"
+    found = [Path(os.environ.get("T3CODE_CLI_PATH", "")), Path.home() / ".t3/bin/t3"]
+    found += sorted(Path.home().glob(".t3/runtime/versions/*/t3"),
+                    key=lambda p: p.stat().st_mtime, reverse=True)
+    executable = next((p for p in found if p.is_file() and os.access(p, os.X_OK)), None)
+    if executable and thread_id:
+        try:
+            result = subprocess.run([str(executable), "thread", "show", thread_id,
+                                     "--messages", "0", "--json"], capture_output=True,
+                                    text=True, timeout=12, cwd=str(Path.home()))
+            data = json.loads(result.stdout) if result.returncode == 0 else None
+            thread = data.get("thread", data) if isinstance(data, dict) else None
+            if isinstance(thread, dict) and thread.get("threadId", thread.get("id")) == thread_id:
+                value = thread.get("status")
+                if thread.get("activeRunId") or value in ("running", "preparing", "queued", "starting", "waiting"):
+                    status = "active"
+                elif value in ("idle", "completed", "failed", "cancelled", "interrupted"):
+                    status = "inactive"
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            pass
+    # An idle owner may resume during this sweep. Never cache an inactive
+    # observation for a later destructive decision.
+    if status != "inactive":
+        cache[thread_id] = status
+    return status
+
+
+def stop_registered(pane, label, name, state, owner_guard=None):
+    if not binding_matches(pane, label, name, state):
+        return False
+    if not stop(pane, expected=lambda: binding_matches(pane, label, name, state)
+                and (owner_guard is None or owner_guard())):
+        return False
+    latest = load_state(label, name)
+    latest["stopped"] = time.time()
+    save_state(label, name, latest)
+    try:
+        unshare(label, name)
+    except (leases.PolicyError, OSError) as error:
+        latest = load_state(label, name)
+        latest["cleanup_warning"] = str(error)
+        save_state(label, name, latest)
+        print(f"hum: {label}/{name} stopped; share cleanup needs attention: {error}", file=sys.stderr)
+    emit("stopped", label, name, state["cwd"])
+    return True
+
+
+def cleanup(dry_run=False, as_json=False, empty_only=False):
+    """The janitor only operates on registered local panes; it never starts Herdr."""
+    results, cache = [], {}
+    if not session_running():
+        results.append({"result": "session-offline", "reason": "Herdr was not started"})
+    else:
+        # Herdr can change focus when another workspace's last pane is closed.
+        # Preserve terminals focused at the start as well as at the final check.
+        initially_focused = ({p['pane_id'] for p in herdr('pane', 'list').get('panes', [])
+                              if p.get('focused')} if empty_only else set())
+        for path in sorted(STATE_DIR.glob("*/*.json")):
+            if ".run-" in path.name:
+                continue
+            label, name = path.parent.name, path.stem
+            row = {"project": label, "server": name}
+            try:
+                with leases.state_lock(STATE_DIR, label, name):
+                    state = load_state(label, name)
+                    if empty_only:
+                        binding = state.get('binding')
+                        if isinstance(binding, dict) and binding.get('pane_id') in initially_focused:
+                            row.update(result='protected', reason='terminal was focused at start of sweep')
+                        elif state.get('terminal_closed'):
+                            row.update(result='closed', reason='already archived and closed')
+                        else:
+                            row.update(terminals.close_finished(sys.modules[__name__], label, name, state,
+                                                                dry_run=dry_run))
+                    elif state.get("stopped"):
+                        row.update(result="stopped", reason="already stopped")
+                    elif "lifecycle" not in state:
+                        row.update(result="unmanaged", reason="no lifecycle policy")
+                    else:
+                        policy = leases.validate(state["lifecycle"])
+                        expired, reason = leases.due(policy, time.time(),
+                                                     lambda owner: exact_thread_status(owner, cache))
+                        row.update(result=reason, lifetime=policy["kind"])
+                        if expired:
+                            cwd = state.get("cwd")
+                            if (not isinstance(cwd, str) or not Path(cwd).is_dir()
+                                    or project(cwd)[0] != label):
+                                raise leases.PolicyError("recorded project path does not match")
+                            ws = find_workspace(label)
+                            pane = find_pane(ws, name) if ws else None
+                            if not pane or not binding_matches(pane, label, name, state):
+                                row.update(result="identity-mismatch", reason="pane/run identity could not be proved")
+                            elif dry_run:
+                                row.update(result="would-stop", reason=reason)
+                            elif stop_registered(pane, label, name, state,
+                                                 owner_guard=lambda: leases.due(
+                                                     policy, time.time(),
+                                                     lambda owner: exact_thread_status(owner, {}))[0]):
+                                row.update(result="stopped", reason=reason)
+                                warning = load_state(label, name).get("cleanup_warning")
+                                if warning:
+                                    row["warning"] = warning
+                            else:
+                                row.update(result="protected", reason="owner or run changed before stop")
+            except (OSError, ValueError, KeyError, SystemExit, subprocess.TimeoutExpired) as error:
+                row.update(result="protected", reason=str(error))
+            results.append(row)
+    if as_json:
+        print(json.dumps(results, indent=2))
+    else:
+        for row in results:
+            target = f"{row.get('project', '')}/{row.get('server', '')}".strip("/")
+            print(f"hum cleanup: {target or SESSION}: {row['result']} ({row.get('reason', row.get('lifetime', ''))})")
+    return 0
+
+
+def lifecycle_summary(state):
+    if "lifecycle" not in state:
+        return "unmanaged"
+    try:
+        policy = leases.validate(state["lifecycle"])
+    except leases.PolicyError:
+        return "invalid-policy (protected)"
+    owners = {owner: claim for owner, claim in policy["owners"].items() if not claim["released"]}
+    expiry = max((claim["expires_at"] for claim in owners.values()
+                  if claim["expires_at"] is not None), default=None)
+    remaining = f"{max(0, int((expiry - time.time()) / 60))}m" if expiry is not None else "no expiry"
+    return f"{policy['kind']} {remaining} owner={','.join(owners) or '(released)'}"
+
+
+def parse(argv):
+    """Split argv into positionals, options, and the command after `--`."""
+    cmd = None
+    if "--" in argv:
+        i = argv.index("--")
+        argv, cmd = argv[:i], shlex.join(argv[i + 1:]) or None
+    opts, pos, it = {}, [], iter(argv)
+    for a in it:
+        if a in ("--wait", "--timeout", "-n", "-C", "--port", *leases.POLICY_OPTIONS):
+            value = next(it, None)
+            if value is None or value.startswith("--"):
+                raise leases.PolicyError(f"{a} needs a value")
+            opts[a] = value
+        elif a in ("--all", "--json", "--dry-run", "--full", "--share", "--empty-only"):
+            opts[a] = True
+        elif a.startswith("-"):
+            raise leases.PolicyError(f"unknown option {a}")
+        else:
+            pos.append(a)
+    return pos, opts, cmd
+
+
+def main():
+    leases.text(leases.component(SESSION), "session")
+    if os.environ.get("HUM_NOTIFY", "none") not in ("none", "desktop", "ghostty"):
+        raise leases.PolicyError("HUM_NOTIFY must be none, desktop, or ghostty")
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(USAGE)
+        return 0
+    action, rest = argv[0], argv[1:]
+    if action == "_run":
+        if len(rest) != 3:
+            die("invalid internal run arguments")
+        execute_run(*rest)
+        return 0
+    pos, opts, cmd = parse(rest)
+    leases.validate_options(opts)
+    cwd = opts.get("-C") or os.getcwd()
+    timeout = float(opts.get("--timeout") or 120)
+    if not leases.finite(timeout) or timeout <= 0:
+        raise leases.PolicyError("--timeout must be a positive number")
+
+    if action == "_emit":
+        finish_emit(rest[0])
+        return 0
+    if action == "doctor":
+        if rest:
+            raise leases.PolicyError("doctor takes no arguments")
+        print(json.dumps({"session": SESSION, "state_directory": str(STATE_DIR),
+                          "herdr": shutil.which(os.environ.get("HUM_HERDR_BIN", "herdr")),
+                          "notifications": os.environ.get("HUM_NOTIFY", "none"),
+                          "tailscale": shutil.which("tailscale"), "lsof": shutil.which("lsof"),
+                          "t3_cli_explicit": bool(os.environ.get("T3CODE_CLI_PATH")),
+                          "empty_terminal_close": (sys.platform.startswith("linux")
+                              and hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"))}, indent=2))
+        return 0
+    if action == "relay":
+        relay()
+        return 0
+    if action == "watch":
+        ensure_server()
+        executable = herdr_bin()
+        os.execv(executable, [executable, "session", "attach", SESSION])
+    if action in ("cleanup", "janitor"):
+        if pos or cmd or any(key not in ("--dry-run", "--json", "--empty-only") for key in opts):
+            raise leases.PolicyError("cleanup accepts only --dry-run, --json and --empty-only; it is always local")
+        return cleanup(bool(opts.get("--dry-run")), bool(opts.get("--json")), bool(opts.get('--empty-only')))
+
+    if action not in ("ls", "up", "restart", "keep", "release", "logs", "wait", "down", "share", "unshare", "rm", "close"):
+        raise leases.PolicyError(f"unknown command '{action}' (hum --help)")
+
+    label, root = project(cwd)
+    # Archived logs remain readable even while Herdr is offline.
+    if action == 'logs' and pos:
+        state = load_state(label, pos[0])
+        if state.get('terminal_closed'):
+            archive = run_archive(label, pos[0], state)
+            lines = archive.read_text().splitlines()
+            print('\n'.join(lines[-int(opts.get('-n') or 80):]))
+            return 0
+    ensure_server()
+
+    if action == "ls":
+        workspaces = herdr("workspace", "list").get("workspaces", [])
+        rows, inventory = [], []
+        for ws in workspaces:
+            shown = ws.get("label") or ""
+            base = shown.split(" ", 1)[1] if " " in shown else shown
+            if not opts.get("--all") and base != label:
+                continue
+            for p in panes(ws["workspace_id"]):
+                if not p.get("label"):
+                    continue
+                running = busy(p["pane_id"], agree=2, gap=0.2)
+                try:
+                    st = load_state(base, p["label"])
+                except (ValueError, OSError):
+                    st = {"lifecycle": {}}
+                detail = st["share"]["url"] if st.get("share") else st.get("cmd", "")[:60]
+                rows.append((machine_label(), shown, p["label"], "running" if running else "stopped",
+                             detail + "  [" + lifecycle_summary(st) + "]"))
+                inventory.append({"machine": machine_label(), "project": base, "server": p["label"],
+                                  "status": "running" if running else "stopped", "cwd": st.get("cwd"),
+                                  "share": st.get("share"), "lifecycle": st.get("lifecycle"),
+                                  "summary": lifecycle_summary(st)})
+        if opts.get("--json"):
+            # JSON inventory is deliberately local, suitable for cleanup/audit tooling.
+            print(json.dumps(inventory, indent=2))
+            return 0
+        if opts.get("--all"):
+            rows += remote_rows()
+        if not rows:
+            print(f"no servers{'' if opts.get('--all') else f' for {label}'} (hum ls --all for every project)")
+        for r in rows:
+            print(f"{r[0]:<6} {r[1]:<34} {r[2]:<10} {r[3]:<8} {r[4]}")
+        return 0
+
+    if not pos:
+        die(f"'{action}' needs a server name, e.g. hum {action} web")
+    name = pos[0]
+    leases.component(label)
+    leases.component(name)
+    with leases.state_lock(STATE_DIR, label, name):
+        return server_action(action, pos, opts, cmd, label, root, timeout)
+
+
+def server_action(action, pos, opts, cmd, label, root, timeout):
+    name = pos[0]
+    state = load_state(label, name)
+    if state.get("cwd") and Path(state["cwd"]).resolve() != Path(root).resolve():
+        raise leases.PolicyError("this project label belongs to a different checkout")
+    owner = owner_id(opts)
+
+    if action in ("up", "restart"):
+        previous = state.get("lifecycle")
+        # Validate before any stop or pane mutation. This also protects other owners' policies.
+        policy = leases.claim(previous, opts, owner, time.time(), new_run=True)
+        ws = ensure_workspace(label, root)
+        pane, created = ensure_pane(ws, root, name)
+        if action == "up" and not created and busy(pane):
+            policy = leases.claim(previous, opts, owner, time.time(), new_run=False)
+            if policy is not None:
+                if not state.get("binding"):
+                    state["binding"] = adopt_binding(pane, state)
+                elif not binding_matches(pane, label, name, state):
+                    raise leases.PolicyError("recorded run no longer owns this pane; restart explicitly")
+                state["lifecycle"] = policy
+                save_state(label, name, state)
+            print(f"hum: {label}/{name} already running; recent output:")
+            print(since_marker(read(pane, 15), state.get("marker", ""))[-2000:])
+            return 0
+        command = cmd or state.get("cmd") or default_cmd(root)
+        if not command:
+            die(f"no command for {name}; pass one: hum {action} {name} -- npm run dev")
+        if action == "restart":
+            if not stop(pane):
+                raise leases.PolicyError("previous process tree did not stop; restart aborted")
+        launch(pane, command, label, name, root, policy)
+        emit("restarted" if action == "restart" else "started", label, name, root, command)
+        print(f"hum: {action} {label}/{name}: {command}")
+        if opts.get("--wait"):
+            code = wait_for(pane, label, name, opts["--wait"], timeout)
+            if code:
+                return code
+        if opts.get("--share") or (action == "restart" and state.get("share")):
+            if not opts.get("--wait"):
+                time.sleep(3)
+            url = share(pane, label, name, int(opts["--port"]) if opts.get("--port") else None)
+            print(f"hum: shared on the tailnet: {url}")
+            hint = share_hint(command)
+            if hint:
+                print(hint)
+        return 0
+
+    ws = find_workspace(label)
+    pane = find_pane(ws, name) if ws else None
+    if action == 'close':
+        if state.get('terminal_closed'):
+            print(f'hum: {label}/{name} already closed; logs and restart command retained')
+            return 0
+        result = terminals.close_finished(sys.modules[__name__], label, name, state)
+        print(f"hum: {result['result']} {label}/{name}; logs and restart command retained")
+        return 0
+    if not pane:
+        die(f"no server '{name}' in {label} (hum ls --all)")
+
+    if action == "keep":
+        if not busy(pane):
+            raise leases.PolicyError("server is stopped; use hum up to start it")
+        policy = leases.claim(state.get("lifecycle"), opts, owner, time.time(), new_run=True)
+        if not state.get("binding"):
+            state["binding"] = adopt_binding(pane, state)
+        elif not binding_matches(pane, label, name, state):
+            raise leases.PolicyError("recorded run no longer owns this pane; restart explicitly")
+        state["lifecycle"] = policy
+        save_state(label, name, state)
+        print(f"hum: kept {label}/{name}: {lifecycle_summary(state)}")
+        return 0
+    if action == "release":
+        if any(key in opts for key in ("--lifetime", "--purpose", "--ttl")):
+            raise leases.PolicyError("release accepts --owner, not new lifetime settings")
+        state["lifecycle"] = leases.release(state.get("lifecycle"), owner)
+        save_state(label, name, state)
+        policy = state["lifecycle"]
+        if policy["kind"] != "persistent" and all(item["released"] for item in policy["owners"].values()):
+            if not stop_registered(pane, label, name, state):
+                print(f"hum: released {label}/{name}; unproved run identity left untouched")
+                return 0
+        print(f"hum: released {owner}'s claim on {label}/{name}")
+        return 0
+    if action == "logs":
+        marker = load_state(label, name).get("marker", "")
+        print(read(pane, int(opts.get("-n") or 80)) if opts.get("--full") else
+              since_marker(read(pane, int(opts.get("-n") or 80)), marker))
+        return 0
+    if action == "wait":
+        if len(pos) < 2:
+            die("usage: hum wait <name> <TEXT> [--timeout SEC]")
+        return wait_for(pane, label, name, pos[1], timeout)
+    if action == "down":
+        if not stop(pane):
+            raise leases.PolicyError("process tree did not stop; state left running")
+        state["stopped"] = time.time()
+        save_state(label, name, state)
+        emit("stopped", label, name, root)
+        print(f"hum: stopped {label}/{name}")
+        return 0
+    if action == "share":
+        url = share(pane, label, name, int(opts["--port"]) if opts.get("--port") else None)
+        print(url)
+        hint = share_hint(load_state(label, name).get("cmd", ""))
+        if hint:
+            print(hint, file=sys.stderr)
+        return 0
+    if action == "unshare":
+        s = unshare(label, name)
+        print(f"hum: stopped sharing {s['url']}" if s else f"hum: {name} was not shared")
+        return 0
+    if action == "rm":
+        if not stop(pane):
+            raise leases.PolicyError("process tree did not stop; refusing to remove its terminal")
+        unshare(label, name)
+        tab = next((p["tab_id"] for p in panes(ws) if p["pane_id"] == pane), None)
+        herdr("tab", "close", tab) if tab else herdr("pane", "close", pane)
+        state_file(label, name).unlink(missing_ok=True)
+        emit("removed", label, name, root)
+        print(f"hum: removed {label}/{name}")
+        return 0
+    die(f"unknown command '{action}' (hum --help)")
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (leases.PolicyError, ValueError, OSError, subprocess.TimeoutExpired) as error:
+        die(str(error))
+    except (KeyError, TypeError) as error:
+        die(f"unsupported Herdr response or state ({error}); verify CLI compatibility and registered state")

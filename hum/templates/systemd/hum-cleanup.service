@@ -1,0 +1,14 @@
+# Example only. Replace every /absolute/path and choose the same session/state
+# as the interactive command. The installed template deliberately previews.
+[Unit]
+Description=Inspect registered hum environment leases
+
+[Service]
+Type=oneshot
+Environment=HUM_SESSION=hum
+Environment=XDG_STATE_HOME=/absolute/path/to/state
+Environment=HUM_HERDR_BIN=/absolute/path/to/herdr
+ExecStart=/absolute/path/to/hum cleanup --dry-run --json
+WorkingDirectory=/absolute/path/to/checkouts
+Nice=10
+TimeoutStartSec=5min
