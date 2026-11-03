@@ -1,6 +1,6 @@
 # h-stack
 
-A curated set of 21 skills I use with Claude Code, Codex and Cursor. Each is a folder with a `SKILL.md` and, where needed, scripts and references.
+A curated set of 25 skills I use with Claude Code, Codex and Cursor. Each is a folder with a `SKILL.md` and, where needed, scripts and references.
 
 These are portable exports from my shared skills folder. Personal identities, private hosts and project-specific setup are left out. Install the skills you need; the instructions adapt to the tools and repository you actually have.
 
@@ -35,6 +35,10 @@ These are portable exports from my shared skills folder. Personal identities, pr
 
 - [agent-doc-bootstrap](agent-doc-bootstrap/SKILL.md): write thin, durable repository instructions without copying a snapshot of the repo.
 - [context-rollover](context-rollover/SKILL.md): preserve decisions and verification in a handoff; start a new task only when explicitly requested and supported.
+- [t3-peer](t3-peer/SKILL.md): work with threads on another linked T3 Code environment using the tools available in your harness.
+- [t3-provider-pools](t3-provider-pools/SKILL.md): diagnose account isolation, provider routing and app authentication from your own installed configuration.
+- [sticky-notes](sticky-notes/SKILL.md): edit Markdown notes in a directory you choose and mark tasks complete only after verification.
+- [savethat-cli](savethat-cli/SKILL.md): retrieve saved links with the official SaveThat CLI and an existing authenticated account.
 - [honcho-memory](honcho-memory/SKILL.md): recall and save a few durable facts in a user-configured Honcho workspace shared by agents.
 - [infisical-new-project](infisical-new-project/SKILL.md): connect a selected new app's development command to Infisical without copying secrets into its repo.
 - [crisp-voice](crisp-voice/SKILL.md): write or edit messages in a direct, concise engineer and founder voice.
@@ -68,6 +72,17 @@ done
 
 Commands inside a `SKILL.md` that use `<skill-dir>` mean the folder where you installed that skill.
 
+For an add-only linker that also runs on macOS without GNU `realpath`, use [tools/link-agent-skills.py](tools/link-agent-skills.py). It previews changes by default, requires explicit source and target directories, and preserves existing files, directories and broken symlinks:
+
+```sh
+python3 tools/link-agent-skills.py --source ~/.agents/h-stack --target ~/.claude/skills --target ~/.codex/skills
+# After reviewing the plan, repeat with --apply.
+```
+
+This is a manual linking helper. It does not install a filesystem watcher or a background service.
+
+Run it against directories you control, with a stable source collection and parent directories. It pins each target directory while creating links and stops if its identity changes. A failure can leave earlier successful links in place; rerunning preserves them.
+
 ## Requirements
 
 The instructions work with the tools your agent can access. Installing a skill does not install its CLI dependencies or grant permission to publish, merge, send messages or share private code.
@@ -80,6 +95,11 @@ Most of the new skills are instructions only. Supporting references ship in thei
 - **Honcho memory:** an authenticated Honcho service or MCP connection, a selected workspace and a configured peer/identity. This repository does not deploy Honcho, create a peer, ingest conversations or grant permission to store private content. Without that setup the skill skips automatic memory access and reports missing setup for an explicit request.
 - **Infisical:** the official CLI plus an existing Cloud account or self-hosted service and permission for the selected organization/project. Authentication stays local. The skill discovers the installed CLI's commands; no private endpoint, VPN or machine-specific wrapper is bundled.
 - **Context rollover:** supported thread/task tooling is optional. Without it the skill returns a complete handoff to copy into a new conversation.
+- **T3 peer:** a T3 Code harness with linked-environment and thread tools, plus an authorized remote environment. The export contains instructions only, with no custom MCP client, login renewal or Git/Syncthing transfer helper.
+- **Provider pools:** your installed T3 Code, provider and proxy documentation/configuration. This is an instruction-only workflow; it does not install proxies, inject credentials or alter shared provider settings.
+- **Sticky notes:** an existing Markdown notes directory selected by the user. No notes app is required.
+- **SaveThat:** the official `@savethat/cli` and an authenticated account with appropriate scope. The skill does not bundle the CLI, a credential launcher or the SaveThat backend. See [source coverage](SOURCE_COVERAGE.md) for the package's license/source distinction.
+- **Skill linker:** Python 3.10+ on macOS or Linux. Only explicitly selected target directories are changed with `--apply`.
 - **Demo video:** Python 3.10+, Node.js 20+, `ffmpeg` and `ffprobe`. The capture helper also needs Chrome or Chromium and `playwright-core` installed beside the helper so Node can resolve it:
 
   ```sh
@@ -94,20 +114,25 @@ The shipped Python tools use the standard library. To check the helpers without 
 python3 -m unittest discover -s pr-babysitter/scripts -v
 python3 external-review-loop/scripts/review_loop.py --help
 python3 product-demo-video/scripts/demo_video.py plan product-demo-video/scripts/example-spec.json
+python3 -m unittest discover -s tools -v
 ```
 
 ## Not bundled
 
 This is not a copy of my whole local folder. Machine-specific integrations stay out until they can work independently. In particular, `hum` is a Herdr-backed process manager with lifecycle helpers and host setup; it needs a separately tested package, not just its instruction file copied here.
 
+The four portable integration skills above are instructions, not releases of their private helper implementations. The legacy peer login/Git-transfer tools, provider configuration writers/bridges and automatic skill-watcher installers are not bundled. [Source coverage](SOURCE_COVERAGE.md) lists every skill and custom integration named in the coding-setup article, its public source and the remaining release work.
+
 ## Not in here, but worth getting
 
 I also use these skills. They belong to their authors, so I have not copied them here.
 
-- Emil Kowalski's design engineering skill, for UI craft and animation detail: [x.com/emilkowalski](https://x.com/emilkowalski)
+- Emil Kowalski's design engineering skill, for UI craft and animation detail: [github.com/emilkowalski/skills](https://github.com/emilkowalski/skills/tree/main/skills/emil-design-eng)
 - Anatomy by Ryan, for detailed interactive isometric SVG figures: [github.com/wheresryan22/anatomy](https://github.com/wheresryan22/anatomy) and [x.com/wheresryan22](https://x.com/wheresryan22)
 - Codebase Design and Domain Modeling by Matt Pocock, for deep modules and shared domain language: [github.com/mattpocock/skills](https://github.com/mattpocock/skills/tree/main/skills/engineering)
 - stop-slop by Hardik Pandya, for tightening prose that reads as AI-written: [github.com/hardikpandya/stop-slop](https://github.com/hardikpandya/stop-slop) and [x.com/hvpandya](https://x.com/hvpandya)
+- Portless by Vercel Labs, for stable local development URLs: [github.com/vercel-labs/portless](https://github.com/vercel-labs/portless/tree/main/skills/portless) (Apache-2.0).
+- Vercel's [React best practices](https://github.com/vercel-labs/agent-skills/tree/main/skills/react-best-practices) and [Web Interface Guidelines](https://github.com/vercel-labs/web-interface-guidelines).
 
 ## License
 
