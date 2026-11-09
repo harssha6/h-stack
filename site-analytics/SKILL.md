@@ -12,7 +12,7 @@ This skill uses [Umami](https://umami.is) (open source, cookie-free, self-hosted
 ## Set up once
 
 - Choose an instance: self-hosted Umami or Umami Cloud. On a self-hosted instance, expose only the tracker (`/script.js`) and the collector (`POST /api/send`) publicly; keep the admin UI private.
-- Put the credentials in your secret manager, not in a repository: `UMAMI_API_URL`, and either `UMAMI_API_KEY` (Cloud) or `UMAMI_USERNAME` and `UMAMI_PASSWORD` (self-hosted). Optional: `UMAMI_TEAM`, `UMAMI_SCRIPT_URL`. See the docstring of [scripts/umami-site.py](scripts/umami-site.py).
+- Put the credentials in your secret manager, not in a repository: `UMAMI_API_URL` (self-hosted `https://<your-umami>/api`, Cloud `https://api.umami.is/v1`), and either `UMAMI_API_KEY` (Cloud) or `UMAMI_USERNAME` and `UMAMI_PASSWORD` (self-hosted). Optional: `UMAMI_TEAM`, and `UMAMI_SCRIPT_URL` when your tracker is not at the default (Cloud: `https://cloud.umami.is/script.js`; self-hosted: the API host plus `/script.js`). See the docstring of [scripts/umami-site.py](scripts/umami-site.py).
 - One Umami website per site domain.
 
 ## Add a site

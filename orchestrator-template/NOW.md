@@ -11,6 +11,13 @@ Read this first after any compaction or restart. Keep it short; history goes in 
 - <DATE>: Never block: on quota or auth failures fall through to the next pool (MODEL_ROUTING.md).
 - <DATE>: Quiet hours <from> to <to>: no messages unless overnight work is broken.
 
+## Config
+- Time zone: <IANA zone, for example Europe/Berlin>. Quiet hours: <from> to <to>.
+- Ideas file: <path, or "BOARD.md 💡 section" (default)>.
+- Global agent guide: <path, or "none">.
+- Machines and environment ids the pulse lists: <machine = id, ...>.
+- Definition of done: <for example "personal: PR + preview; work: ready-to-merge PR, never merged by an agent">.
+
 ## Decisions
 - <DATE>: <decision> because <why>.
 

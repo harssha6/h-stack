@@ -3,7 +3,7 @@
 Updated **<DAY DATE, TIME TZ>** by <the orchestrator | the hourly pulse | the morning brief>.
 Legend: 🔴 needs you today · 🟡 needs you, no rush · ⏳ waiting on someone else · 🏃 an agent is on it · ✅ done · 💡 idea, not started · 🧊 parked
 
-To act, reply in the orchestrator thread with the **bold words** (for example "merge #36").
+To act, reply in the orchestrator thread with the **bold words** (for example "merge #12").
 
 ## ▶️ Next up (do these in order)
 

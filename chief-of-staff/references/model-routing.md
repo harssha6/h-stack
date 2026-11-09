@@ -23,8 +23,10 @@ Keep a small `pool-health.json` next to this file:
 ```
 
 1. Read it before choosing a pool. Skip a pool marked blocked.
-2. Record a new 429, usage-limit or auth block with evidence and time. Clear it when a real task succeeds on that pool. An unknown quota is not a block; an observed 429 is.
-3. Never spend a model request only to probe whether a pool works.
+2. Record a new 429, usage-limit or auth block with evidence and time, and `until` when the provider states a reset time. Clear it when a real task succeeds on that pool. An unknown quota is not a block; an observed 429 is.
+3. A block expires by itself: once `until` has passed, or after 3 hours when no reset time was given, the pool is eligible again for the next real task. If that task fails the same way, record the block again.
+4. Never spend a model request only to probe whether a pool works.
+5. When every pool for a task is blocked, do not spin: mark the ledger row `waiting-on-other (provider reset)` with the earliest `until`, tell the owner once, and pick the work up when a block expires.
 
 ## The stall guard
 
@@ -32,7 +34,7 @@ A provider limit does not always fail a run. Some harnesses leave a run "running
 
 1. Check every thread or worker about 10 minutes after launch, then every 15 minutes while it runs.
 2. A run whose only new items are provider retries, 429s, auth or quota errors, or that shows no progress, is dead. Cancel it (only the parent that started it can) and rerun the same brief on the next route, carrying over partial output.
-3. When a whole pool goes down, move every thread it stalled, not only the next one you notice. Example: one night a personal account hit its rate limit at 02:20; the orchestrator switched four running threads, the pulse included, to another provider and told each to continue. None of them waited for morning.
+3. When a whole pool goes down, move every thread it stalled, not only the next one you notice. Example: one night a personal account hit its rate limit; the orchestrator switched four running threads, the pulse included, to another provider and told each to continue. None of them waited for morning.
 
 ## Spare quota
 

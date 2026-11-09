@@ -44,7 +44,7 @@ The coding-setup article's orchestrator section describes these. They are generi
 | [quota-treemap](quota-treemap/SKILL.md) | Configurable collector for local Claude Code and Codex logs, rules-driven build, treemap template and offline tests. | The local per-machine collectors, hardcoded account homes and project rules. |
 | [site-analytics](site-analytics/SKILL.md) | Launch basics and an environment-configured Umami script for self-hosted or Cloud instances. | The private instance address, admin routes, team and website ids. |
 
-Verification for this release: the quota-treemap tests ran on Linux against fake logs; `umami-site.py list` and `stats` ran read-only against one real self-hosted Umami instance. Umami Cloud's API-key path follows Umami's documentation and was not run. The chief-of-staff prompts are rewritten from prompts that run daily; the template copies themselves were not scheduled.
+Verification for this release: the 7 quota-treemap tests passed on Linux with Python 3.10 and 3.12 against fake logs, and a reviewer ran the collector and build read-only on real local logs and rendered the page in headless Chrome; `umami-site.py list` and `stats` ran read-only against one real self-hosted Umami instance. Umami Cloud's API-key path follows Umami's documentation and was not run. The chief-of-staff prompts are rewritten from prompts that run daily; the template copies themselves were not scheduled.
 
 The repository also includes useful skills not named individually in the article. See the complete [README inventory](README.md#skills).
 

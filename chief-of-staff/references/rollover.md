@@ -24,13 +24,15 @@ Everything in the orchestrator folder: `NOW.md`, `BOARD.md`, `LEDGER.md`, `LOG.m
 
 ## First run (new thread)
 
-1. Read, in order: `ROLLOVER.md`, `HANDOFF.md`, `NOW.md`, `BOARD.md`, `LEDGER.md`, the last 40 lines of `LOG.md`, `PULSE.md`, the owner's global agent guide.
+1. Read, in order: `ROLLOVER.md`, `HANDOFF.md`, `NOW.md`, `BOARD.md`, `LEDGER.md`, the first 40 lines of `LOG.md` (newest first), `PULSE.md`, and the owner's global agent guide if `NOW.md` **Config** names one.
 2. Take over the schedules. List scheduled tasks. For every enabled task bound to the old thread (the morning brief at least), create the same task (same title, prompt and schedule) bound to yourself, then disable the old one. Do not change any prompt text other than thread ids.
 3. Update `ORCHESTRATOR.md`: your thread id, the date, and move the old id under "Previous threads".
 4. Pin yourself. Unpin and archive (settle) the old thread.
-5. Verify: no enabled task is bound to the old id; the pulse prompt reads `ORCHESTRATOR.md` and hardcodes no thread id; `ORCHESTRATOR.md` shows your id; the old thread is archived; you are pinned. Append one line to `LOG.md`.
+5. Verify: no enabled task is bound to the old id; the pulse prompt reads `ORCHESTRATOR.md` and hardcodes no thread id; `ORCHESTRATOR.md` shows your id; the old thread is archived; you are pinned. Add one line at the top of `LOG.md`.
 6. Post one short message to the owner: "Fresh thread. Board is current." plus anything from `HANDOFF.md` that waits on them today. Nothing else.
 
 ## Failure
 
-If any first-run step fails, leave the old thread active, write the failure to `LOG.md` and post it in both threads. Never leave the owner with zero orchestrator threads or two half-working ones.
+If any first-run step fails, leave the old thread active, add the failure at the top of `LOG.md` and post it in both threads.
+
+If your harness cannot create threads or rebind schedules, roll over by hand: run "Steps (old thread)" 0 to 2, start a new thread yourself in this folder with the step 3 message, and move the schedules yourself. Never leave the owner with zero orchestrator threads or two half-working ones.

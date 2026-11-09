@@ -36,7 +36,8 @@ function fit(d){const p=d.querySelector('.p'),n=d.querySelector('.n');
  n.style.display='none';for(const ps of [13,11,10]){p.style.fontSize=ps+'px';if(fits(d))return false}
  p.style.display='none';return false}
 function draw(w){const el=document.getElementById('t'+w);el.innerHTML='';const hid=[];const W=el.clientWidth,H=el.clientHeight,A=W*H,g=2;
- const items=D[w].filter(r=>r.pct>0).map(r=>({...r,v:r.pct/100*A})).sort((a,b)=>b.v-a.v);
+ const live=D[w].filter(r=>r.pct>0),sum=live.reduce((a,r)=>a+r.pct,0)||1;
+ const items=live.map(r=>({...r,v:r.pct/sum*A})).sort((a,b)=>b.v-a.v);
  for(const t of squarify(items,0,0,W,H,[])){const d=document.createElement('div');d.className='tile';
   Object.assign(d.style,{left:(t.x+g/2)+'px',top:(t.y+g/2)+'px',width:(t.w-g)+'px',height:(t.h-g)+'px',background:color(t.g)});
   d.innerHTML=`<div class="p">${t.pct.toFixed(1)}%</div><div class="n">${esc(t.name)}</div>`;

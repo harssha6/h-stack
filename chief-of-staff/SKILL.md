@@ -15,13 +15,37 @@ Rule zero: if something was said only in chat, it does not exist. Write it to a 
 
 ## Setup
 
-1. Copy [`orchestrator-template/`](../orchestrator-template/) into a private folder you control, for example `~/orchestrator`. Keep it out of any public repository: it will hold work context, links and names. Local Git history is useful; a remote usually is not.
-2. Open that folder as the orchestrator's project or working directory, so its `AGENTS.md` (the short contract) loads on every turn.
-3. Fill in `ORCHESTRATOR.md` (the current thread id and where it runs) and the **Standing rules** in `NOW.md`.
-4. Install the companion skill [`delegation-ledger`](../delegation-ledger/SKILL.md). Optional: [`context-rollover`](../context-rollover/SKILL.md), [`bookmark-scout`](../bookmark-scout/SKILL.md), [`site-analytics`](../site-analytics/SKILL.md), [`quota-treemap`](../quota-treemap/SKILL.md).
-5. Schedule the two prompts in `orchestrator-template/prompts/` with your harness's scheduler: the hourly pulse (its own thread) and the morning brief (bound to the orchestrator thread). Replace every `<PLACEHOLDER>` first.
+1. Copy the template and the two references into a private folder you control. Keep it out of any public repository: it will hold work context, links and names. Local Git history is useful; a remote usually is not.
 
-The examples use T3 Code tool names (`t3_thread_list`, `t3_thread_read`, `t3_thread_send`, `delegate_task`, `schedule_task`). Any harness that can list, read and message threads and run scheduled prompts works; map the names to yours. Without thread tools, the files and the ledger still work, but checks run when you open the thread.
+   ```sh
+   HSTACK=~/.agents/h-stack          # where you cloned this repository
+   cp -R "$HSTACK/orchestrator-template" ~/orchestrator
+   cp "$HSTACK/chief-of-staff/references/rollover.md" ~/orchestrator/ROLLOVER.md
+   cp "$HSTACK/chief-of-staff/references/model-routing.md" ~/orchestrator/MODEL_ROUTING.md
+   cd ~/orchestrator && ln -s AGENTS.md CLAUDE.md   # Claude Code reads CLAUDE.md, Codex reads AGENTS.md
+   git init -q && git add -A && git commit -qm 'Orchestrator from template'
+   ```
+
+2. Open that folder as the orchestrator's project or working directory, so its contract (`AGENTS.md`, or `CLAUDE.md` through the link) loads on every turn.
+3. Fill in `ORCHESTRATOR.md` (name, thread id, where it runs) and the **Standing rules** and **Config** in `NOW.md`. List your provider pools in `MODEL_ROUTING.md`, or delete it if you use one account.
+4. Install the companion skill [`delegation-ledger`](../delegation-ledger/SKILL.md). Optional: [`context-rollover`](../context-rollover/SKILL.md), [`bookmark-scout`](../bookmark-scout/SKILL.md), [`site-analytics`](../site-analytics/SKILL.md), [`quota-treemap`](../quota-treemap/SKILL.md).
+5. Check what your harness can do (below), then schedule the two prompts in `prompts/`: the hourly pulse in its own thread and the morning brief bound to the orchestrator thread. Replace every `<PLACEHOLDER>` first.
+6. Smoke test: ask the orchestrator for something small ("open a PR that fixes the README typo"). In the same turn it should add a `LEDGER.md` row, start a thread and add a `BOARD.md` row. Then run the pulse prompt once by hand and check it updates `PULSE.md` and verifies or chases the row.
+
+## What your harness needs
+
+The prompts were written for T3 Code, whose MCP tools let one thread manage others (`t3_thread_list`, `t3_thread_read`, `t3_thread_send`, `t3_thread_launch`, `delegate_task`, `t3_thread_configure`, `t3_thread_organize`, `schedule_task`). Map each capability to your harness. Where it has none, the step is skipped or done by hand; the files and the ledger work either way.
+
+| Capability | Used for | Without it |
+|---|---|---|
+| Read and message other threads | pulse, ledger checks, nudges | Checks run only when you open the orchestrator; you nudge threads yourself |
+| Start a thread or delegate a task | every handoff | The orchestrator writes the brief and the ledger row; you start the thread |
+| Scheduled prompts | hourly pulse, morning brief | Run each prompt by hand, for example when you sit down and before you stop |
+| Switch a thread's model or cancel a run | pool fall-through, stall guard | Note the block in `MODEL_ROUTING.md` and restart the brief on another account yourself |
+| Archive, snooze, pin threads | inbox zero, waiting on others, rollover | Keep the "settle candidates" list in `PULSE.md` and act on it yourself |
+| Rebind a schedule to another thread | rollover | Skip rollover: start a fresh orchestrator by hand, point it at `ROLLOVER.md` "First run" |
+
+Each prompt says "skip this step if your harness cannot do it". A skipped step goes into `PULSE.md` as "skipped: no <capability>", so you can see what did not run.
 
 ## The files
 
@@ -30,16 +54,16 @@ The examples use T3 Code tool names (`t3_thread_list`, `t3_thread_read`, `t3_thr
 | `BOARD.md` | **The owner** | Every ask and its state: next up, needs you, waiting on others, running, done (last 3 days), ideas, parked |
 | `NOW.md` | Orchestrator, pulse, brief | Standing rules, decisions, waiting list, dated notes |
 | `LEDGER.md` | Orchestrator, pulse, brief | Every handoff with its proof check (skill `delegation-ledger`) |
-| `LOG.md` | Agents | Dated one-liners, newest first |
+| `LOG.md` | Agents | Dated one-liners, newest first: add at the top, read from the top |
 | `PULSE.md` | Agents | The hourly pulse's last notes; overwritten every run |
 | `ORCHESTRATOR.md` | Every schedule and helper | The current orchestrator thread id. Nothing else hardcodes it |
 
-Optional, add them when you need them: `ROLLOVER.md` (the runbook in [references/rollover.md](references/rollover.md)), `HANDOFF.md` (the last rollover's handoff), `MODEL_ROUTING.md` (see [references/model-routing.md](references/model-routing.md)), `LEARNING.md` (what self-learning changed).
+Copied at setup: `ROLLOVER.md` ([references/rollover.md](references/rollover.md)) and `MODEL_ROUTING.md` ([references/model-routing.md](references/model-routing.md)). Created when needed: `HANDOFF.md` (the last rollover's handoff), `pool-health.json` (blocked pools), `LEARNING.md` (what self-learning changed). Prompts treat a missing optional file as "feature off".
 
 ## The board contract
 
 - The owner reads `BOARD.md`, not the chat. Update it in the same turn whenever they ask for something, a task changes state, or something finishes. Bump the `Updated` line.
-- One line per item. The action they take goes in **bold**, in words they can reply with ("merge #36", "go on the staged set").
+- One line per item. The action they take goes in **bold**, in words they can reply with ("merge #12", "go on the staged set").
 - **Next up** sits at the top: their next three actions in order, the most time-bound first. When they come back to work, this block is the whole answer to "what now". Whoever edits the board re-ranks it.
 - Only verified states. Never mark something done because a thread said so; the ledger check decides.
 - Ideas the owner drops go under 💡 and do not start until they say go.
@@ -71,7 +95,7 @@ Write these into `NOW.md` and the template `AGENTS.md`, adjusted to the owner. T
 - **Every launch brief states the commit identity** for that repository, passed per command (`git -c user.name=... -c user.email=...`). Never change global Git config.
 - **Never print secrets.** Reference secret names and paths, not values. Long-running processes go through whatever process manager the owner watches.
 - **Never block.** On a quota, rate-limit or auth failure, fall through to the next provider pool (see model routing). Record the block with evidence.
-- **Inbox zero means the work is done, never hidden.** Never archive or settle a thread that waits on the owner, has an open PR or deploy, has an open ledger row, or has a schedule bound to it.
+- **Inbox zero means the work is done, never hidden.** Archive (settle) a thread only when its ledger row is `verified` and nothing else holds it. Never archive a thread that waits on the owner or someone else, has an open PR or deploy, has any ledger row that is not verified, or has a schedule bound to it. Waiting threads get snoozed, not archived.
 
 ## Waiting on other people: snooze, then wake on a signal
 
@@ -104,11 +128,11 @@ Once a day an agent reviews the owner's messages from the last 24 hours and impr
 1. Read the owner's messages in the orchestrator thread (and threads it launched where they chatted). Look for corrections, frustration, praise, repeated asks, new standing rules and changed minds.
 2. Turn each lesson into the smallest edit: a new or sharper rule here, or a fix in the skill that owns the behavior. When they changed their mind, the latest instruction wins; delete the old line.
 3. Back up the file first. Keep edits small. Never delete one of their explicit rules unless they reversed it. Never add a rule they did not imply.
-4. Do not edit the owner's global agent guide; propose such changes on the board instead.
+4. Do not edit the owner's global agent guide (if they have one, for example `~/.claude/CLAUDE.md` or `~/.codex/AGENTS.md`); propose such changes on the board instead.
 5. Log every change in `LEARNING.md`: date, what they said (short quote), what changed, which file. If nothing qualifies, write nothing.
 
 A good lesson names its failure: "a UI port passed two reviews but dropped the body font; reviews now compare computed styles, not screenshots" is a rule other agents can follow. "Be more careful" is not.
 
 ## Ideas
 
-When work lands or something surprising happens (a clean bug story, a big before/after number, a new automation), add one line to the owner's ideas file: what happened, the proof, why someone else would care. Internal plumbing is rarely an idea by itself; pitch what other people can see, use or learn from. Ideas never start without the owner's go.
+When work lands or something surprising happens (a clean bug story, a big before/after number, a new automation), add one line to the ideas file named in `NOW.md` **Config** (default: the 💡 section of `BOARD.md`): what happened, the proof, why someone else would care. Internal plumbing is rarely an idea by itself; pitch what other people can see, use or learn from. Ideas never start without the owner's go.

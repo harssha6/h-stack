@@ -1,15 +1,15 @@
 # Hourly pulse (scheduled prompt template)
 
-Schedule: every hour, in its **own** thread (not the orchestrator's, so the owner's thread stays readable). Replace every `<PLACEHOLDER>`. Tool names are T3 Code's; map them to your harness.
+Schedule: every hour, in its **own** thread (not the orchestrator's, so the owner's thread stays readable). Replace every `<PLACEHOLDER>`. Tool names are T3 Code's; map them to your harness (see "What your harness needs" in the `chief-of-staff` skill). Optional steps (C, D, H) can be deleted.
 
 ---
 
-Hourly orchestrator pulse. Your state file is `<ORCHESTRATOR_DIR>/PULSE.md`. First read the `chief-of-staff` skill, then `<ORCHESTRATOR_DIR>/ORCHESTRATOR.md` (the current orchestrator thread id; it changes on rollover), `NOW.md`, `PULSE.md`, `LEDGER.md`, the last 30 lines of `LOG.md`, `MODEL_ROUTING.md` and `pool-health.json` if present. Compute the current time in `<TIME_ZONE>`.
+Hourly orchestrator pulse. Your state file is `<ORCHESTRATOR_DIR>/PULSE.md`. First read the `chief-of-staff` skill, then `<ORCHESTRATOR_DIR>/ORCHESTRATOR.md` (the current orchestrator thread id; it changes on rollover), `NOW.md`, `PULSE.md`, `LEDGER.md`, the first 30 lines of `LOG.md` (newest first), and `MODEL_ROUTING.md` and `pool-health.json` if they exist. Compute the current time in `<TIME_ZONE>`. If your harness cannot do a step, skip it and write "skipped: no <capability>" in PULSE.md.
 
-If the time is inside `<MAINTENANCE_WINDOW>` (optional), write "skip: maintenance window" to PULSE.md and end.
+If the time is inside `<MAINTENANCE_WINDOW>` (optional), change only the "Last run" line of PULSE.md's Checkpoints block to "<time> (skipped: maintenance window)", keep everything else, and end.
 
 **A. Threads, every machine** (`<ENVIRONMENT_IDS>`): list non-archived threads updated in the last 2 hours plus any running or waiting. Flag failed runs since the last pulse; stuck runs (running over 20 minutes with only provider-retry, 429, auth or quota items, or no new items for 45 minutes); threads waiting on input or approval; threads completed since the last pulse. Read the real error or final message before judging (bounded reads: small limits, at most 1,500 characters per item).
-- A stuck or failed thread that an agent owns (launched by the orchestrator or listed in NOW.md or LOG.md), with no owner message in the last 2 hours: unblock it. Queue one message telling it to continue the SAME brief on the next pool per MODEL_ROUTING.md; if its own provider is the blocked one, switch its model first. Cancel only delegate children you started. Never act on a thread the owner is chatting in; report it instead.
+- A stuck or failed thread that an agent owns (launched by the orchestrator or listed in NOW.md or LOG.md), with no owner message in the last 2 hours: unblock it. Queue one message telling it to continue the SAME brief on the next pool per MODEL_ROUTING.md (if present); if its own provider is the blocked one, switch its model first. Cancel only delegate children you started. Never act on a thread the owner is chatting in; report it instead.
 - A completed thread: note its outcome (PR URL, preview URL, what it needs from the owner).
 
 **A2. Inbox zero (settle candidates).** The goal is an empty inbox because the work is done, never because threads were hidden. Sort every non-archived thread into "Settle candidates" or "Staying open and why". A thread is a candidate only if ALL are true: completed (or an idle helper whose parent finished); no pending request or unanswered question to the owner; its outcome was already reported; no open PR from it that still needs action and no preview the owner still needs; no item for it under "Waiting on the owner" in NOW.md; no schedule bound to it (never list the pulse thread, the orchestrator thread or the brief thread); not updated in the last 60 minutes; no open row in LEDGER.md. Write both lists to PULSE.md. Do NOT archive anything yourself: the morning brief verifies and settles. At most 15 tool calls.
@@ -24,7 +24,7 @@ If the time is inside `<MAINTENANCE_WINDOW>` (optional), write "skip: maintenanc
 
 **E. Board.** Refresh `BOARD.md` from what you verified in A to C: move rows between sections when their real state changed, add new asks or finished work, drop ✅ items older than 3 days, re-rank ▶️ Next up, set the Updated line. Re-read the file right before writing. Only facts you checked this run or that are already in NOW.md or LEDGER.md. If nothing changed, leave it alone.
 
-**F. Write** `PULSE.md` (overwrite): time, last scan time, what you did, what needs the owner (ranked), settle candidates and staying-open lists, the Ledger section, open PRs. Append ONE line to `LOG.md` only if you did something.
+**F. Write** `PULSE.md`: overwrite everything except the Checkpoints block, which you carry over and update (last run, last external scan, last scout). Then what you did, what needs the owner (ranked), settle candidates and staying-open lists, the Ledger section, open PRs. Add ONE line at the top of `LOG.md`, under today's heading, only if you did something.
 
 **G. Tell the orchestrator** (thread id from ORCHESTRATOR.md, mode queue) ONLY when at least one is true: a decision the owner must make today; a PR became ready for their review or merge; a preview is ready for them; you rerouted or unblocked something material; something is broken that you could not fix; a ledger row became verified or failed. One message, at most 10 lines, with links. During quiet hours (`<QUIET_HOURS>`) send nothing unless overnight work is broken and you could not fix it. Otherwise end with the single word "quiet".
 

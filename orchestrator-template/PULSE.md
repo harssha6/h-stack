@@ -1,8 +1,11 @@
 # Orchestrator pulse
 
-Overwritten by every pulse run. The morning brief and the orchestrator read it.
+Overwritten by every full pulse run, except the **Checkpoints** block, which each run carries over and updates. The morning brief and the orchestrator read it.
 
-Last run: <DATE TIME TZ>. Previous: <TIME>. Last external scan (chat, email): <TIME or n/a>.
+## Checkpoints (carry over on every run, including skipped ones)
+- Last run: <DATE TIME TZ> (<full | skipped: reason>)
+- Last external scan (chat, email): <TIME or n/a>
+- Last bookmark scout: <TIME or n/a>
 
 ## Did
 - <what this run checked and changed>

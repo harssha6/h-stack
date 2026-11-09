@@ -60,10 +60,9 @@ def lines(path):
 
 
 def claude_sessions(home):
-    """Weight = input + 1.25 cache write + 0.1 cache read + 5 output. Deduped by message id + request id."""
+    """Weight = input + 1.25 cache write + 0.1 cache read + 5 output, using the last usage record per message id + request id."""
     for path in glob.glob(os.path.join(home, "projects", "**", "*.jsonl"), recursive=True):
-        seen, cwd, first, ts = set(), "", "", None
-        tin = cw = cr = out = 0
+        final, cwd, first, ts = {}, "", "", None
         for d in lines(path):
             cwd = cwd or d.get("cwd", "")
             ts = ts or d.get("timestamp")
@@ -74,14 +73,13 @@ def claude_sessions(home):
             if d.get("type") == "assistant":
                 msg = d.get("message") or {}
                 usage = msg.get("usage")
-                key = (msg.get("id"), d.get("requestId"))
-                if not usage or key in seen:
-                    continue
-                seen.add(key)
-                tin += usage.get("input_tokens") or 0
-                cw += usage.get("cache_creation_input_tokens") or 0
-                cr += usage.get("cache_read_input_tokens") or 0
-                out += usage.get("output_tokens") or 0
+                if usage:
+                    # The same message can be logged several times while it streams; the last record is final.
+                    final[(msg.get("id"), d.get("requestId"))] = usage
+        tin = sum(u.get("input_tokens") or 0 for u in final.values())
+        cw = sum(u.get("cache_creation_input_tokens") or 0 for u in final.values())
+        cr = sum(u.get("cache_read_input_tokens") or 0 for u in final.values())
+        out = sum(u.get("output_tokens") or 0 for u in final.values())
         weight = tin + 1.25 * cw + 0.1 * cr + 5 * out
         if weight:
             yield ts or "", cwd, round(weight), out, first

@@ -9,7 +9,8 @@ Configuration comes from environment variables (load them from your secret manag
 for example `infisical run -- python3 umami-site.py list`):
 
     UMAMI_API_URL      API base. Self-hosted: https://<your-umami>/api. Umami Cloud: https://api.umami.is/v1
-    UMAMI_SCRIPT_URL   tracker URL for the tag (default: UMAMI_API_URL without /api, plus /script.js)
+    UMAMI_SCRIPT_URL   tracker URL for the tag. Default: https://cloud.umami.is/script.js with an API key,
+                       otherwise UMAMI_API_URL without /api, plus /script.js
     UMAMI_API_KEY      Umami Cloud API key (sent as x-umami-api-key), or
     UMAMI_USERNAME + UMAMI_PASSWORD   self-hosted login
     UMAMI_TEAM         optional team name; websites are listed and created in that team
@@ -20,6 +21,7 @@ import json
 import os
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -65,8 +67,17 @@ def connect():
 
 
 def websites(team):
-    path = f"/teams/{team['id']}/websites?pageSize=200" if team else "/websites?pageSize=200"
-    return rows(call("GET", path))
+    """Every website, following pagination until a short or empty page."""
+    base = f"/teams/{team['id']}/websites" if team else "/websites"
+    out, page, size = [], 1, 100
+    while True:
+        payload = call("GET", f"{base}?page={page}&pageSize={size}")
+        batch = rows(payload) or []
+        out += batch
+        total = payload.get("count") if isinstance(payload, dict) else None
+        if len(batch) < size or (isinstance(total, int) and len(out) >= total):
+            return out
+        page += 1
 
 
 def by_domain(team, domain):
@@ -80,6 +91,8 @@ def script_url():
     explicit = os.environ.get("UMAMI_SCRIPT_URL", "").strip()
     if explicit:
         return explicit
+    if "x-umami-api-key" in HEADERS:
+        return "https://cloud.umami.is/script.js"
     base = BASE[: -len("/api")] if BASE.endswith("/api") else BASE
     return base + "/script.js"
 
@@ -110,7 +123,12 @@ def main(argv):
         if len(argv) < 3:
             sys.exit("usage: umami-site.py stats <domain> [days]")
         domain = argv[2]
-        days = int(argv[3]) if len(argv) > 3 else 7
+        try:
+            days = int(argv[3]) if len(argv) > 3 else 7
+        except ValueError:
+            sys.exit("days must be a whole number")
+        if days < 1:
+            sys.exit("days must be 1 or more")
         site = by_domain(team, domain)
         end = int(time.time() * 1000)
         query = urllib.parse.urlencode({"startAt": end - days * 86_400_000, "endAt": end})
@@ -121,4 +139,9 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    try:
+        sys.exit(main(sys.argv))
+    except urllib.error.HTTPError as err:
+        sys.exit(f"Umami API answered {err.code} {err.reason} for {err.url}")
+    except urllib.error.URLError as err:
+        sys.exit(f"cannot reach Umami at {BASE}: {err.reason}")
