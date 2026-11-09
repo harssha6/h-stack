@@ -1,6 +1,6 @@
 # h-stack
 
-A curated set of 26 skills I use with Claude Code, Codex and Cursor. Each is a folder with a `SKILL.md` and, where needed, scripts and references.
+A curated set of 31 skills I use with Claude Code, Codex and Cursor, plus a template for running an orchestrator thread. Each skill is a folder with a `SKILL.md` and, where needed, scripts and references.
 
 These are portable exports from my shared skills folder. Personal identities, private hosts and project-specific setup are left out. Install the skills you need; the instructions adapt to the tools and repository you actually have.
 
@@ -30,6 +30,14 @@ These are portable exports from my shared skills folder. Personal identities, pr
 - [pr-babysitter](pr-babysitter/SKILL.md): take an open PR through CI, bot and reviewer findings and a verified handoff.
 - [clean-worktree](clean-worktree/SKILL.md): create an isolated git worktree and branch when the current checkout is dirty.
 - [product-demo-video](product-demo-video/SKILL.md): record a real product flow and edit it into a short captioned demo video.
+
+### Orchestration
+
+- [chief-of-staff](chief-of-staff/SKILL.md): run one long-lived orchestrator thread that routes work to other threads, keeps its memory in files and keeps the owner oriented through a board. Start from [orchestrator-template](orchestrator-template/README.md).
+- [delegation-ledger](delegation-ledger/SKILL.md): give every handoff a proof check, because a thread saying "done" is a claim, not evidence.
+- [bookmark-scout](bookmark-scout/SKILL.md): read new bookmarks daily and turn the useful few into mocks or draft previews for a yes or no.
+- [quota-treemap](quota-treemap/SKILL.md): chart how Claude Code and Codex subscription usage splits across projects, from local session logs.
+- [site-analytics](site-analytics/SKILL.md): ship every site with Umami analytics, a favicon set and a share image, and read how it performs.
 
 ### Context, setup and writing
 
@@ -101,6 +109,10 @@ Most of the new skills are instructions only. Supporting references ship in thei
 - **Hum:** Python 3.10+, Git and a compatible [Herdr](https://github.com/herdrdev/herdr) executable. The package includes the command and its lifecycle/terminal helpers; read [hum/SKILL.md](hum/SKILL.md) before installation. Tailscale sharing and desktop notifications are optional and need their own configured tools. Linux-only process/terminal guards fail closed on unsupported hosts. Installation previews changes by default; no host service is enabled automatically.
 - **Sticky notes:** an existing Markdown notes directory selected by the user. No notes app is required.
 - **SaveThat:** the official `@savethat/cli` and an authenticated account with appropriate scope. The skill does not bundle the CLI, a credential launcher or the SaveThat backend. See [source coverage](SOURCE_COVERAGE.md) for the package's license/source distinction.
+- **Chief of staff:** thread tools that can list, read and message threads, plus a scheduler for the two prompts in [orchestrator-template/prompts](orchestrator-template/prompts). The examples use T3 Code's tool names. Without them, the files and ledger still work, but checks run only when you open the thread. Nothing is scheduled for you.
+- **Bookmark scout:** read access to a bookmark source you already use (for example [savethat-cli](savethat-cli/SKILL.md)). It writes mocks, reports and draft PRs only.
+- **Quota treemap:** Python 3.10+ and local Claude Code or Codex session logs. Read-only; its data folder holds prompt excerpts, so keep it private.
+- **Site analytics:** a self-hosted Umami instance or an Umami Cloud account, with credentials in environment variables. The script uses Python 3.10+ and the standard library.
 - **Skill linker:** Python 3.10+ on macOS or Linux. Only explicitly selected target directories are changed with `--apply`.
 - **Demo video:** Python 3.10+, Node.js 20+, `ffmpeg` and `ffprobe`. The capture helper also needs Chrome or Chromium and `playwright-core` installed beside the helper so Node can resolve it:
 
@@ -120,6 +132,8 @@ python3 -m unittest discover -s tools -v
 python3 -m unittest discover -s hum/scripts/tests -v
 python3 -m unittest discover -s t3-peer/scripts -p 'test_*.py' -v
 python3 -m unittest discover -s t3-provider-pools/scripts -p 'test_*.py' -v
+python3 -m unittest discover -s quota-treemap/scripts -p 'test_*.py' -v
+python3 site-analytics/scripts/umami-site.py --help
 ```
 
 [tools/host-tools-workflow.yml](tools/host-tools-workflow.yml) is a proposed GitHub Actions workflow for Ubuntu/Python 3.10 and 3.12 plus macOS/Python 3.12. It is a template, not an enabled workflow. A maintainer with GitHub workflow permission can review it and place it under `.github/workflows/` to run those checks. Local Linux tests do not establish macOS or live-host compatibility.
