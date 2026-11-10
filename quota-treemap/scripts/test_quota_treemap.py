@@ -95,9 +95,10 @@ class QuotaTreemapTest(unittest.TestCase):
         self.assertNotIn("__DATA__", page)
 
     def test_shares_are_not_rounded_for_layout(self):
-        tiles, _ = build.summarize([{"ts": self.recent, "weight": 1.0, "kind": "claude", "remote": "", "cwd": f"/p{i}", "first": ""} for i in range(180)],
-                                   {"projects": [{"name": f"p{i}", "group": "personal", "match": [f"/p{i}"]} for i in range(180)]},
+        tiles, _ = build.summarize([{"ts": self.recent, "weight": 1.0, "kind": "claude", "remote": "", "cwd": f"/p{i:03d}", "first": ""} for i in range(180)],
+                                   {"projects": [{"name": f"p{i:03d}", "group": "personal", "match": [f"/p{i:03d}"]} for i in range(180)]},
                                    30, datetime.datetime.now(datetime.timezone.utc))
+        self.assertEqual(len(tiles), 180)  # fixed-width ids, so no rule swallows another
         self.assertAlmostEqual(sum(t["pct"] for t in tiles), 100.0, places=6)
 
     def test_rules_are_validated(self):
