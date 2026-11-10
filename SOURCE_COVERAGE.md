@@ -31,6 +31,21 @@ This branch includes the four portable exports proposed in the earlier coverage 
 | [sticky-notes](sticky-notes/SKILL.md) | Read and narrowly edit a user-selected Markdown notes directory, with verified task completion. | Personal notes, fixed directories, the Stick This application. |
 | [savethat-cli](savethat-cli/SKILL.md) | Retrieve bookmarks through an existing official CLI/account, discover its bundled skill, and protect private content. | Personal Keychain launcher, application environment-file fallback, CLI implementation, hosted service/backend. |
 
+### Orchestration release (9 November 2026 IST)
+
+The coding-setup article's orchestrator section describes these. They are generic rewrites of the local skills, under the same MIT license:
+
+| Skill or folder | What is included | What is not included |
+| --- | --- | --- |
+| [chief-of-staff](chief-of-staff/SKILL.md) | The orchestrator playbook: file-based memory, board contract, authority rules, waiting on others with signals, launch rules, rhythm, self-learning, plus [rollover](chief-of-staff/references/rollover.md) and [model routing](chief-of-staff/references/model-routing.md) references. Locally the orchestrator is named Friday; the public name says what it does. | The owner's own standing rules, thread and project ids, machines, accounts, work context and the live state files. |
+| [orchestrator-template](orchestrator-template/README.md) | Blank `AGENTS.md`, `ORCHESTRATOR.md`, `BOARD.md`, `NOW.md`, `LEDGER.md`, `LOG.md`, `PULSE.md`, and the hourly pulse and morning brief prompts with placeholders. Not a skill: it has no `SKILL.md`. | Any real board, ledger or log content. No schedule is created. |
+| [delegation-ledger](delegation-ledger/SKILL.md) | Row format, review rules and examples. | Real ledger rows. |
+| [bookmark-scout](bookmark-scout/SKILL.md) | Source-agnostic daily scout with a try budget and a report format. | A specific bookmark account, credentials or the owner's project map. |
+| [quota-treemap](quota-treemap/SKILL.md) | Configurable collector for local Claude Code and Codex logs, rules-driven build, treemap template and offline tests. | The local per-machine collectors, hardcoded account homes and project rules. |
+| [site-analytics](site-analytics/SKILL.md) | Launch basics and an environment-configured Umami script for self-hosted or Cloud instances. | The private instance address, admin routes, team and website ids. |
+
+Verification for this release: the 7 quota-treemap tests passed on Linux with Python 3.10 and 3.12 against fake logs, and a reviewer ran the collector and build read-only on real local logs and rendered the page in headless Chrome; `umami-site.py list` and `stats` ran read-only against one real self-hosted Umami instance. Umami Cloud's API-key path follows Umami's documentation and was not run. The chief-of-staff prompts are rewritten from prompts that run daily; the template copies themselves were not scheduled.
+
 The repository also includes useful skills not named individually in the article. See the complete [README inventory](README.md#skills).
 
 ## Third-party originals

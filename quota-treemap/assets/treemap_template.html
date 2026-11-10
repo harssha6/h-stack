@@ -1,0 +1,49 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>__TITLE__</title>
+<style>
+:root{--t1:#f0efec;--t2:#c3c2b7;--t3:#8f8e86;color-scheme:dark}
+*{box-sizing:border-box}html{background:#1a1a19}body{margin:0 auto;max-width:1100px;padding:24px;font-family:ui-sans-serif,system-ui,sans-serif;color:var(--t1)}
+h1{font-size:20px;margin:0 0 4px;font-weight:600}.sub{color:var(--t2);margin:0 0 16px}
+.legend{display:flex;gap:18px;flex-wrap:wrap;color:var(--t2);font-size:12px;margin:0 0 14px}.legend i,.key i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}.panel h2{font-size:13px;color:var(--t2);font-weight:500;margin:0 0 8px}
+.tm{position:relative;width:100%;height:420px}
+.tile{position:absolute;border-radius:4px;overflow:hidden;padding:6px 7px;display:flex;flex-direction:column;gap:1px}
+.tile:hover{filter:brightness(1.15)}.tile .n{font-weight:600;color:#fff;line-height:1.2;text-shadow:0 1px 2px #0006}.tile .p{font-weight:650;color:#fff;line-height:1.1;white-space:nowrap;text-shadow:0 1px 2px #0006}
+#tip{position:fixed;pointer-events:none;background:#2c2c2a;border:1px solid #3a3a37;border-radius:8px;padding:8px 10px;font-size:12px;display:none;box-shadow:0 6px 20px #0008;max-width:260px}#tip .m{color:var(--t2)}
+.key{color:var(--t2);font-size:11.5px;margin:8px 0 0;line-height:1.5}.note{color:var(--t3);font-size:11.5px;margin-top:14px;line-height:1.5}
+</style></head><body>
+<h1>__TITLE__</h1><p class="sub">As of __DATE__</p>
+<p class="sub">Each square is all included usage (= 1). Tile area = share of weighted tokens.</p>
+<div class="legend" id="legend"></div>
+<div class="grid" id="grid"></div>
+<p class="note">Weight = input + 1.25 cache write + 0.1 cache read + 5 output tokens (Codex: uncached input + 0.1 cached + 5 output). A proxy for quota burn, not the provider's meter. Sessions are dated by their start.</p>
+<div id="tip"></div>
+<script>
+const D=__DATA__, T=__TOTALS__, G=__GROUPS__;
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const color=g=>G[g]||G.mixed;
+const tip=document.getElementById('tip');
+document.getElementById('legend').innerHTML=Object.keys(G).map(g=>`<span><i style="background:${color(g)}"></i>${esc(g)}</span>`).join('');
+const wins=Object.keys(D).sort((a,b)=>a-b);
+document.getElementById('grid').innerHTML=wins.map(w=>`<div class="panel"><h2>Last ${w} days · ${T[w].toLocaleString()}M units</h2><div class="tm" id="t${w}"></div><p class="key" id="k${w}"></p></div>`).join('');
+function worst(row,w){const s=row.reduce((a,b)=>a+b.v,0),mx=Math.max(...row.map(r=>r.v)),mn=Math.min(...row.map(r=>r.v));return Math.max(w*w*mx/(s*s),(s*s)/(w*w*mn))}
+function squarify(items,x,y,w,h,out){items=items.slice();while(items.length){const short=Math.min(w,h);let row=[items[0]],i=1;while(i<items.length&&worst(row.concat(items[i]),short)<=worst(row,short)){row.push(items[i]);i++}
+ items=items.slice(row.length);const s=row.reduce((a,b)=>a+b.v,0);
+ if(w>=h){const rw=s/h;let yy=y;for(const r of row){const rh=r.v/rw;out.push({...r,x,y:yy,w:rw,h:rh});yy+=rh}x+=rw;w-=rw}
+ else{const rh=s/w;let xx=x;for(const r of row){const rw=r.v/rh;out.push({...r,x:xx,y,w:rw,h:rh});xx+=rw}y+=rh;h-=rh}}return out}
+function fits(d){return d.scrollHeight<=d.clientHeight+0.5&&d.scrollWidth<=d.clientWidth+0.5}
+function fit(d){const p=d.querySelector('.p'),n=d.querySelector('.n');
+ for(const [ps,ns] of [[20,12.5],[17,11.5],[15,11],[13,10],[12,9.5],[11,9]]){p.style.fontSize=ps+'px';n.style.fontSize=ns+'px';if(fits(d))return true}
+ n.style.display='none';for(const ps of [13,11,10]){p.style.fontSize=ps+'px';if(fits(d))return false}
+ p.style.display='none';return false}
+function draw(w){const el=document.getElementById('t'+w);el.innerHTML='';const hid=[];const W=el.clientWidth,H=el.clientHeight,A=W*H,g=2;
+ const live=D[w].filter(r=>r.pct>0),sum=live.reduce((a,r)=>a+r.pct,0)||1;
+ const items=live.map(r=>({...r,v:r.pct/sum*A})).sort((a,b)=>b.v-a.v);
+ for(const t of squarify(items,0,0,W,H,[])){const d=document.createElement('div');d.className='tile';
+  Object.assign(d.style,{left:(t.x+g/2)+'px',top:(t.y+g/2)+'px',width:(t.w-g)+'px',height:(t.h-g)+'px',background:color(t.g)});
+  d.innerHTML=`<div class="p">${t.pct.toFixed(1)}%</div><div class="n">${esc(t.name)}</div>`;
+  d.onmousemove=e=>{tip.style.display='block';tip.style.left=(e.clientX+14)+'px';tip.style.top=(e.clientY+14)+'px';
+   tip.innerHTML=`<b>${esc(t.name)}</b><br>${t.pct.toFixed(1)}% · ${esc(t.g)}`+(t.claude||t.codex?`<br><span class="m">Claude ${t.claude}M · Codex ${t.codex}M units</span>`:'')};
+  d.onmouseleave=()=>tip.style.display='none';el.appendChild(d);if(!fit(d))hid.push(t)}
+ document.getElementById('k'+w).innerHTML=hid.length?'Too small to label: '+hid.map(t=>`<span style="white-space:nowrap"><i style="background:${color(t.g)}"></i>${esc(t.name)} ${t.pct.toFixed(1)}%</span>`).join(' · '):''}
+const R=()=>wins.forEach(draw);R();addEventListener('resize',R);
+</script></body></html>

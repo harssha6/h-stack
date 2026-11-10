@@ -1,0 +1,14 @@
+{
+  "groups": {
+    "work": "#3987e5",
+    "personal": "#199e70",
+    "setup": "#d95926"
+  },
+  "fallback": "personal",
+  "projects": [
+    {"name": "Day job", "group": "work", "match": ["github.com/your-employer/", "github.com:your-employer/", "/work/"]},
+    {"name": "Portfolio + blog", "group": "personal", "match": ["portfolio", "blog"]},
+    {"name": "Side project", "group": "personal", "match": ["side-project"]},
+    {"name": "Orchestrator + agent setup", "group": "setup", "match": ["orchestrator", "dotfiles", "agents/skills"]}
+  ]
+}
