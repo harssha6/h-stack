@@ -1,6 +1,6 @@
 # h-stack
 
-A curated set of 31 skills I use with Claude Code, Codex and Cursor, plus a template for running an orchestrator thread. Each skill is a folder with a `SKILL.md` and, where needed, scripts and references.
+A curated set of 32 skills I use with Claude Code, Codex and Cursor, plus a template for running an orchestrator thread. Each skill is a folder with a `SKILL.md` and, where needed, scripts and references.
 
 These are portable exports from my shared skills folder. Personal identities, private hosts and project-specific setup are left out. Install the skills you need; the instructions adapt to the tools and repository you actually have.
 
@@ -12,6 +12,7 @@ These are portable exports from my shared skills folder. Personal identities, pr
 - [creative-direction-negotiation](creative-direction-negotiation/SKILL.md): turn taste and visual references into precise product choices.
 - [make-interfaces-feel-better](make-interfaces-feel-better/SKILL.md): improve hierarchy, controls and states in an existing web or iOS interface.
 - [motion-design](motion-design/SKILL.md): give animation a purpose, with pacing, continuity and reduced-motion behavior.
+- [screenshot-variant-mocks](screenshot-variant-mocks/SKILL.md): mock small UI changes on real screenshots, compare variants and score them with two vision judges.
 
 ### Evidence and debugging
 
@@ -100,6 +101,7 @@ Most of the new skills are instructions only. Supporting references ship in thei
 
 - **Worktrees:** Git and Bash.
 - **Review planner and PR evidence collector:** Python 3.10+. The collector also needs the GitHub CLI (`gh`) signed in to the intended account. The review planner only prints a plan or command unless you explicitly choose to execute it; local model review needs the corresponding Claude Code or Codex CLI and account.
+- **Screenshot variant mocks:** Python 3.10+ and Pillow. The standalone and inline HTML viewers work offline; optional browser QA uses Node.js and Playwright. Scoring uses your configured OpenAI-compatible vision endpoint, key environment variable and two model IDs. See [setup and a synthetic example](screenshot-variant-mocks/SKILL.md#setup).
 - **Visual verification:** browser/computer-use tools in your harness, or an existing Playwright, Cypress or UI-test setup. For iOS, use macOS with Xcode and an available simulator.
 - **Honcho memory:** an authenticated Honcho service or MCP connection, a selected workspace and a configured peer/identity. This repository does not deploy Honcho, create a peer, ingest conversations or grant permission to store private content. Without that setup the skill skips automatic memory access and reports missing setup for an explicit request.
 - **Infisical:** the official CLI plus an existing Cloud account or self-hosted service and permission for the selected organization/project. Authentication stays local. The skill discovers the installed CLI's commands; no private endpoint, VPN or machine-specific wrapper is bundled.
@@ -122,7 +124,7 @@ Most of the new skills are instructions only. Supporting references ship in thei
 
   Set `CHROME_PATH` if Chrome is not at the default macOS path. For example, on Linux use `CHROME_PATH=/usr/bin/google-chrome`. Edit the capture choreography for your page and choose a fresh `OUT` directory; capture refuses to reuse an existing directory. Set the real source and font paths in the example video spec before rendering.
 
-The shipped Python tools use the standard library. To check the helpers without invoking a model or writing to GitHub:
+Most shipped Python tools use the standard library; screenshot variant helpers also need Pillow. To check the helpers without invoking a model or writing to GitHub:
 
 ```sh
 python3 -m unittest discover -s pr-babysitter/scripts -v
@@ -134,6 +136,8 @@ python3 -m unittest discover -s t3-peer/scripts -p 'test_*.py' -v
 python3 -m unittest discover -s t3-provider-pools/scripts -p 'test_*.py' -v
 python3 -m unittest discover -s quota-treemap/scripts -p 'test_*.py' -v
 python3 site-analytics/scripts/umami-site.py --help
+python3 -m unittest discover -s screenshot-variant-mocks/scripts/tests -v
+python3 screenshot-variant-mocks/examples/synthetic.py /tmp/variant-example
 ```
 
 [tools/host-tools-workflow.yml](tools/host-tools-workflow.yml) is a proposed GitHub Actions workflow for Ubuntu/Python 3.10 and 3.12 plus macOS/Python 3.12. It is a template, not an enabled workflow. A maintainer with GitHub workflow permission can review it and place it under `.github/workflows/` to run those checks. Local Linux tests do not establish macOS or live-host compatibility.
